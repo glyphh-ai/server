@@ -123,6 +123,21 @@ async def test_the_plans_cap_is_checked_for_the_whole_file(
     assert same.status_code == 200
 
 
+async def test_a_cap_lowered_below_what_the_org_holds_keeps_it_all_and_refuses_new_ones(
+    engine: AsyncEngine, ada: httpx.AsyncClient, worker: Worker
+) -> None:
+    who, key = await an_org(engine, ada)
+    await a_model(ada, key, n=20)
+    await pinned(engine, who.org_id, cloud_precedents=10)  # as Free went from 5,000 to 1,000 (2026-10-22)
+    assert (await ada.get("/v1/models/shapes", headers=key)).json()["precedents"] == 20  # nothing is deleted
+    over = await ada.post("/v1/models/shapes/record", json={"data": shape(500)}, headers=key)
+    error = over.json()["error"]
+    assert (over.status_code, error["reason"], error["used"], error["max"]) == (403, "precedents", 20, 10)
+    same = await ada.post("/v1/models/shapes/record", json={"data": shape(5)}, headers=key)  # replaces: no more
+    assert same.status_code == 200
+    assert (await ada.get("/v1/models/shapes", headers=key)).json()["precedents"] == 20
+
+
 async def test_imports_refuse_what_they_cannot_take(
     engine: AsyncEngine, ada: httpx.AsyncClient, worker: Worker
 ) -> None:
