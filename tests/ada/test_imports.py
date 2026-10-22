@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from glyphh_ada import pg
 from glyphh_ada.process import Worker
-from tests.ada.conftest import a_model, an_org, cases, finished, path_of, pinned, shape
+from tests.ada.conftest import a_model, an_org, cases, finished, key_for, path_of, pinned, shape
 from tests.conftest import DATABASE_URL
 
 
@@ -129,6 +129,7 @@ async def test_a_cap_lowered_below_what_the_org_holds_keeps_it_all_and_refuses_n
     who, key = await an_org(engine, ada)
     await a_model(ada, key, n=20)
     await pinned(engine, who.org_id, cloud_precedents=10)  # as Free went from 5,000 to 1,000 (2026-10-22)
+    key = await key_for(ada, who)  # a key not yet resolved: the old allowance is kept a few seconds with a key
     assert (await ada.get("/v1/models/shapes", headers=key)).json()["precedents"] == 20  # nothing is deleted
     over = await ada.post("/v1/models/shapes/record", json={"data": shape(500)}, headers=key)
     error = over.json()["error"]
