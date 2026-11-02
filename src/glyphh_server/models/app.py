@@ -12,6 +12,7 @@ from glyphh_server.models.base import Base, created_at, guid
 
 STATES: tuple[str, ...] = ("draft", "approved", "rejected", "retired")
 TYPES: tuple[str, ...] = ("page", "dashboard", "doc", "diagram", "deck", "design")
+RUN_AS: tuple[str, ...] = ("viewer", "app")  # whose standing a page's call runs with: the person viewing, or the app's
 
 
 class App(Base):
@@ -19,6 +20,7 @@ class App(Base):
     __table_args__ = (
         CheckConstraint(f"state IN {STATES}", name="apps_state"),
         CheckConstraint(f"type IN {TYPES}", name="apps_type"),
+        CheckConstraint(f"run_as IN {RUN_AS}", name="apps_run_as"),
         Index("apps_one_per_app", "runtime_id", "name", unique=True),
     )
 
@@ -40,3 +42,8 @@ class App(Base):
     reason: Mapped[str | None] = mapped_column(Text)  # a rejection's
     created_at: Mapped[datetime] = created_at()
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # What it needs to run (docs/specs/apps.md, 4.7): names only, from the rrotor's `deployed` and `secrets` messages.
+    run_as: Mapped[str] = mapped_column(Text, server_default="viewer")
+    clis: Mapped[list[str]] = mapped_column(ARRAY(Text), server_default=text("'{}'::text[]"))
+    secrets: Mapped[list[str]] = mapped_column(ARRAY(Text), server_default=text("'{}'::text[]"))
+    secrets_missing: Mapped[list[str]] = mapped_column(ARRAY(Text), server_default=text("'{}'::text[]"))

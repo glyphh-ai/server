@@ -74,6 +74,12 @@ number, the one reviewed); `commit_sha` TEXT; `roles` TEXT[] NOT NULL DEFAULT '{
 security by `org_id`, as every org table. Model `models/app.py` (`App`, `STATES`, `TYPES`); `ops/apps.py`,
 `ops/app_views.py` (`AppView`), `ops/catalogue.py`; `api/apps.py`.
 
+Migration `0012_app_needs.sql` (2026-11-02, 4.7) adds what an app needs to run: `run_as` TEXT NOT NULL DEFAULT
+`'viewer'` in (`viewer`, `app`), constraint `apps_run_as`; `clis` TEXT[] NOT NULL DEFAULT '{}' (the CLIs its
+functions use); `secrets` TEXT[] NOT NULL DEFAULT '{}' (the secret names its manifest declares); `secrets_missing`
+TEXT[] NOT NULL DEFAULT '{}' (those not set on the rrotor when it last said). All four come from the rrotor's
+`deployed` message (3.2) and are shown at review (5, 3.5): the server never holds a value, only names.
+
 One row per app per rrotor: a new version published replaces the row's `version`, `commit_sha`, `title`,
 `description`, `type`, `roles`, `submitted_by`, `submitted_at`, and sets `state` back to `draft` (an approved app's
 new version is reviewed again; until then the rrotor keeps serving the approved version, 3.4).
@@ -83,8 +89,12 @@ new version is reviewed again; until then the rrotor keeps serving the approved 
 The rrotor's `deployed` message (rrotor `docs/architecture.md`, 6) carries the manifest. One whose manifest has
 `"kind": "app"` makes or updates the row (`ops/catalogue.py`, `catalogue_deployed`): `title` from `app.title` (else
 the name), `description` from the manifest's `description`, `type` from `app.type` (else `page`; a value outside
-the six is kept as `page`), `roles` from `app.roles`, `submitted_by` from the message's `by` (the Glyphh subject who
-called `app_publish`; null for a deploy from a repo), state `draft`. A `deployed` whose manifest is not an app
+the six is kept as `page`), `roles` from `app.roles`, `run_as` from `app.run_as` (else `viewer`), `clis` from the
+manifest's `clis` (names only, up to 50), `secrets` from its `secrets` (names, up to 100), `secrets_missing` from
+the message's own `secrets_missing` (rrotor's vault knows; absent on an older rrotor: `[]`), `submitted_by` from
+the message's `by` (the Glyphh subject who called `app_publish`; null for a deploy from a repo), state `draft`.
+A rrotor's `secrets` message (protocol 3, 4.7: `{type: "secrets", program, missing}` after a secret of an app is
+set or deleted) updates `secrets_missing` alone, so the review card is current without a new version. A `deployed` whose manifest is not an app
 touches nothing. A `removed` program's row is deleted (its cascade), so a retired and removed app leaves no trace.
 
 ### 3.3 API
@@ -98,8 +108,8 @@ touches nothing. A `removed` program's row is deleted (its cascade), so a retire
 | `POST /v1/apps/{id}/retire` | a reviewer | state `retired`: no longer served or listed; told down the link |
 
 Each app: `{id, runtime_id, runtime_name, runtime_url, name, title, description, type, version, commit_sha, roles,
-state, submitted_by: {id, name, email} | null, submitted_at, reviewed_by, reviewed_at, reason, url}` where `url` is
-`{runtime_url}/apps/{name}/`. `GET /v1/me` carries `groups` and `reviewer: bool`. The operation ids are `listApps`,
+state, run_as, clis, secrets, secrets_missing, submitted_by: {id, name, email} | null, submitted_at, reviewed_by,
+reviewed_at, reason, url}` where `url` is `{runtime_url}/apps/{name}/`. `GET /v1/me` carries `groups` and `reviewer: bool`. The operation ids are `listApps`,
 `getApp`, `approveApp`, `rejectApp`, `retireApp`. Nothing answers at `/v1/artifacts` any more (404, as any unknown
 path): the first cut shipped on 2026-11-01 to nobody but the founder.
 
@@ -114,7 +124,10 @@ branches on it, and the protocol 2 names leave when no rrotor of 0.2.0 is heard 
 
 `app` message (server → rrotor): `{type: "app", program, version, state, roles}` after every approve, reject and
 retire, acknowledged like any message; the welcome carries `apps: [{program, version, state, roles}]` for every row
-of that runtime, so a rrotor that was away catches up. The rrotor keeps what it heard in `/data/apps.json` (read
+of that runtime, so a rrotor that was away catches up, and (2026-11-02) `platform`, the platform's address
+(`GLYPHH_PLATFORM_URL`), so the rrotor's index page (4.8) can link a review there. Up the link, `secrets` `{type:
+"secrets", id, program, missing}` (4.7) after a secret of an app is set or deleted, acknowledged as any message;
+the server keeps `missing` on the row. The rrotor keeps what it heard in `/data/apps.json` (read
 once from `/data/artifacts.json` when that is what a 0.2.0 left) and serves an app only while its active version is
 the catalogue's `version` with state `approved` (a newer version deployed but not yet approved: the approved version
 stays active and served; the draft is a version on the rrotor, not activated — `app_publish` deploys without
@@ -271,6 +284,64 @@ apps among `deployed` with their manifests, as any program; it takes `app` and `
 `artifact` and `artifacts` (a server of protocol 2 is not expected, but the handler costs nothing). The catalogue
 module is `rrotord/catalogue.py` (`Catalogue`, `/data/apps.json`); `rrotord/artifacts.py` is gone.
 
+### 4.7 Sign-ins and keys: an app's CLIs, as the viewer or as the app (2026-11-02, rrotor 0.4.0)
+
+The founder's ruling: an app that needs a CLI on the rrotor uses **the viewer's own sign-in** or **a key the org
+set**, and both work from the app's page as they do from Claude. Everything a program has is an app's already (the
+per-person HOME of 5.7, `cli_login`, the vault); what was missing is the viewer's way in **from the browser**, and a
+way for an app to run as itself. So:
+
+- **`app.run_as`**: `"viewer"` (the default: a page's call runs as the person viewing it, in their HOME, with their
+  sign-ins) or `"app"` (the call runs as the app itself: subject none, the CLI's own shared HOME and the program's
+  vault, exactly as a schedule or a runtime key's call runs). An app set to `app` acts the same for every viewer:
+  the admin signs its CLIs in once, or sets its keys once. The catalogue shows which (3.1, 5).
+- **The viewer's sign-in from the page.** Behind the session cookie, on the app's own origin:
+  - `GET /apps/{name}/clis` → `{clis: [{name, title, signed_in, login: bool}]}` for the app's manifest `clis`, as
+    this viewer stands (`signed_in` from the CLI's `login.signed_in` file in the viewer's HOME; for `run_as: app`,
+    the shared HOME, and `login` false: a viewer does not sign the app's CLI in). A local rrotor answers for its one
+    person.
+  - `POST /apps/{name}/clis/{cli}/login` → the CLI's sign-in run **as the viewer** (`engine.cli_login` with the
+    viewer's subject; `E_APP_RUN_AS` 409 for an app of `run_as: app`; `E_CLI_LOGIN` when the CLI has no `login`),
+    answered as `POST /v1/clis/{name}/login` answers: `needs_input` at step `login` with `data: {url, urls, code,
+    output}` and the run id; the page shows the address and the code, the person opens it on any device, and
+    `POST /apps/{name}/runs/{run_id}/continue` `{answer}` carries a code back when the CLI wants one typed; the run
+    ends `done {signed_in: true}`. Polled with `GET /apps/{name}/runs/{run_id}` (new, the viewer's own runs of this
+    app only: `E_RUN_MISSING` for another's), the same shape as `run_status`.
+  - Audit as `cli_login` from Claude (`run.call` with `caller: app`, `origin: app`); nothing of the sign-in is kept
+    outside the viewer's HOME, as 5.7.
+- **The app's own sign-in (admin).** `cli_login {cli, shared: true}` and `POST /v1/clis/{name}/login` `{shared:
+  true}` sign the CLI in to **its shared HOME** (subject none), for apps of `run_as: app`, schedules and keys: an
+  admin's act (`E_FORBIDDEN` for a member; the local token may). `clis_list` says `signed_in` for the caller and
+  `shared_signed_in` for the shared HOME.
+- **Keys from the vault into a CLI.** `ctx.cli(name, args, stdin=None, env=None)`: `env` maps names
+  (`[A-Z_][A-Z0-9_]*`, at most 32) to values the command gets in its environment, beside the CLI's own, for one
+  command; the usual way is `env={"GH_TOKEN": ctx.secrets["GH_TOKEN"]}`, so an app of `run_as: app` with a declared
+  secret runs `gh` as the key, no sign-in needed. A value of 4 characters or more is masked in the run's log as a
+  secret is. The SDK (`rrotor` on PyPI) says so; the worker's `cli` request carries `env`.
+- **`rrotor.js`**, served at `/apps/_/rrotor.js` (not an app: the `_` name is refused at publish) with
+  `Cache-Control: no-store`, so a page needs no client code of its own:
+  - `rrotor.call(fn, inputs = {})` → the Result (`done` → its `data`; `needs_input`/`needs_approval` → an error
+    with the run id, `rrotor.continue(runId, answer)` carries the answer; `failed` → an error with the code and
+    reason).
+  - `rrotor.clis()` → the list above; `rrotor.ready(names = every CLI of the app)` → resolves once each named CLI is
+    signed in for this viewer, after showing rrotor's **sign-in card** for each that is not: a small fixed-position
+    panel (the app's own styles untouched: a shadow root) saying "Sign in to <title> to continue", the address as a
+    link that opens in a new tab, the device code in large type with a Copy button, "Waiting…", then "Signed in"
+    and gone; it polls the run every two seconds and types a code back when the CLI asks for one; a `run_as: app`
+    app's `ready()` resolves at once.
+  - `rrotor.app` → `{name, title, type, run_as, viewer: {sub, role, groups} | null}` from `GET /apps/{name}/me`
+    (new: what the gate knows of the viewer; a local rrotor: `viewer: null`).
+  - It is plain JavaScript, no build, one file under `rrotord/apps/rrotor.js`, within the CSP (same origin).
+- **The review card knows.** `deployed` carries `secrets_missing` (declared secrets not set in the vault); after
+  `secret_set`/`secret_delete` of an app's secret the rrotor sends `{type: "secrets", program, missing}` up the
+  link (protocol 3; the server's `catalogue.py` takes it). The reviewer sees "Runs as the viewer" or "Runs as the
+  app", the CLIs ("each viewer signs in" or "signed in once by an admin"), the secrets and which are missing, so
+  the admin sets them (`secret_set`) before approving; nothing stops an approval (a missing secret fails the run by
+  name, as always).
+- **What is not here:** a viewer's CLI sign-in on a **self-hosted** rrotor opens the CLI's own device page on the
+  vendor's site, as from Claude; rrotor never proxies a vendor's sign-in, never sees a vendor token (it lands in the
+  HOME inside the sandbox), and the Glyphh server never sees any of it.
+
 ## 5. The platform (`glyphh-ai/platform`)
 
 - **`/apps`** (main sidebar, under Runtimes & licences: "Apps"; `/artifacts` redirects to it): the cards from
@@ -281,6 +352,10 @@ module is `rrotord/catalogue.py` (`Catalogue`, `/data/apps.json`); `rrotord/arti
   a reviewer (`me.reviewer`), tabs **Published** / **Awaiting review** / **Rejected**; on Awaiting review each card
   has **Approve** and **Reject** (a dialog asking the reason); on Published, **Retire** (confirm). Empty states say
   so ("Nothing published yet. Ask Claude to publish what it made to your org."). Refusals as the server's words.
+  Each card says what the app needs (4.7) in one dim line when it needs anything: "Runs as the viewer · bq, gh
+  (each viewer signs in)" or "Runs as the app · gh (signed in once by an admin) · secrets: GH_TOKEN"; a missing
+  secret is named in the warning colour ("GH_TOKEN not set on the rrotor"), with a hint for reviewers that
+  `secret_set` on the rrotor sets it. The connector's panel (3.5) and the mod's Apps section say the same line.
   Types, queries, fixtures, the fake server and the tests all say app (`App`, `AppPage`, `useApps`, `AppsPage`).
 - **Settings → Auth**: "Reviewer groups" (comma-separated, saved with the rest of single sign-on; shown only with
   single sign-on on): `reviewers` in `PUT /v1/org/sso`'s body and view.
@@ -312,6 +387,35 @@ module is `rrotord/catalogue.py` (`Catalogue`, `/data/apps.json`); `rrotord/arti
   `apps_list`; the sign-in skill's `whoami` answer (`groups`, `reviewer`) is unchanged.
 - `programs/app_dashboard` says `"type": "dashboard"`; a `programs/app_react` example (one `.tsx`, recharts) and a
   `programs/app_diagram` example (one `.mmd`) join it.
+
+### 4.8 The catalogue for people without Claude Code
+
+Two doors, neither needing the plugin:
+
+- **In Claude (claude.ai, the desktop and mobile apps):** the Glyphh connector's `apps` tool answers with the
+  **apps panel** (3.5, `ui://glyphh/apps/1`), an MCP App drawn inline in the chat: the same cards, search, type
+  filter, Published / Awaiting review / Rejected for a reviewer, Open, Approve, Reject and Retire. "Show me our
+  apps" or "what is awaiting my review" is enough; nothing leaves the chat. The panel must render in claude.ai's
+  MCP App host as it does in Claude Code's: one page, no external script, the host's `callTool` for every action
+  (as `mcp/panel/apps.html` already does).
+- **In the browser, at the rrotor:** `GET /apps/` (the index, rrotor 0.4.0) is a page the gate serves to a signed-in
+  viewer: this rrotor's apps as cards (title, type, description, version, state), the approved ones the viewer's
+  roles allow with **Open**; for a reviewer (role `admin`, or a group in the welcome's `reviewers`) the drafts and
+  rejected ones too, each with **Review on Glyphh** linking to the platform's Apps page (`{platform}/apps?state=
+  draft`), since a review is the catalogue's act, not the rrotor's. Static HTML from `rrotord/apps/index.html`
+  with the list inlined as JSON, rrotor's own styles, no CDN. A local rrotor serves it to its one person.
+
+### 6.1 The publish skill and sign-ins (4.7)
+
+The skill decides `run_as` with the person: **viewer** when each person should see their own data (a dashboard over
+their warehouse, their GitHub), **app** when the page is the same for everyone and the org holds a key or signs the
+CLI in once. A page that calls functions loads `<script src="/apps/_/rrotor.js"></script>` and awaits
+`rrotor.ready()` before its first `rrotor.call(...)`, so a viewer who is not signed in to a CLI gets rrotor's
+sign-in card rather than an error; a `run_as: app` page needs no card. For a key, the program declares the secret
+and hands it to the CLI with `env=`; the skill tells the person which secrets to set (`secret_set`) and, for a
+`run_as: app` CLI without a key, that an admin signs it in once (`cli_login` with `shared: true`). The examples
+`programs/app_dashboard` (viewer, `gh`) and a new `programs/app_report` (app, a secret into `gh` by `env`) show
+both.
 
 ## 7. Build order and what each repo tests
 

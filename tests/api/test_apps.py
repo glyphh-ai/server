@@ -1,7 +1,8 @@
-"""Org apps (docs/specs/apps.md): the catalogue filled from a rrotor's `deployed` up the link (its type from the
-manifest), listed by roles and type, searched and paged, reviewed by the admin or a reviewer group's member (each
-review told down the link, in the names of the rrotor's protocol), the welcome carrying the runtime's rows and the
-org's reviewers, and the connector's tools."""
+"""Org apps (docs/specs/apps.md): the catalogue filled from a rrotor's `deployed` up the link (its type, who it runs
+as, its CLIs and secret names from the manifest, the missing secrets from the message, kept current by `secrets`),
+listed by roles and type, searched and paged, reviewed by the admin or a reviewer group's member (each review told
+down the link, in the names of the rrotor's protocol), the welcome carrying the runtime's rows, the org's reviewers
+and the platform's address, and the connector's tools."""
 
 import uuid
 from typing import Any
@@ -25,16 +26,24 @@ HOST: str = "https://rrotor.acme.test"
 
 
 def manifest(
-    title: str = "Deploy failures", roles: list[str] | None = None, kind: str = "app", type: str | None = None
+    title: str = "Deploy failures",
+    roles: list[str] | None = None,
+    kind: str = "app",
+    type: str | None = None,
+    run_as: str | None = None,
+    **needs: Any,
 ) -> dict[str, Any]:
     app: dict[str, Any] = {"entry": "index.html", "title": title, "roles": roles or []}
     if type is not None:
         app["type"] = type
+    if run_as is not None:
+        app["run_as"] = run_as
     return {
         "name": "deploy-failures",
         "kind": kind,
         "description": "Last week's deploy failures by service.",
         "app": app,
+        **needs,  # clis, secrets
     }
 
 
@@ -99,6 +108,8 @@ async def test_a_deployed_app_is_catalogued_as_a_draft_and_listed_to_reviewers_o
     )
     assert one["url"] == f"{HOST}/apps/deploy-failures/" and one["reviewed_by"] is None and one["reason"] is None
     assert one["submitted_by"] == {"id": str(bob.user_id), "name": "Grace Hopper", "email": bob.email}
+    needs = (one["run_as"], one["clis"], one["secrets"], one["secrets_missing"])  # nothing said: the defaults
+    assert needs == ("viewer", [], [], [])
     assert (await listed(client, ada))["apps"] == []  # nothing approved yet
     refused = await client.get("/v1/apps", params={"state": "draft"}, headers=bob.headers)
     assert (refused.status_code, refused.json()["error"]["reason"]) == (403, "reviewer")
@@ -194,6 +205,8 @@ async def test_a_rrotor_hears_the_catalogue_in_the_names_of_its_protocol(
         welcome = await ws.receive_json(timeout=WAIT)
         assert welcome["type"] == "welcome" and welcome["accepted"] is True and other not in welcome
         assert [(a["type"], a["program"], a["state"]) for a in welcome[many]] == [(one, "deploy-failures", "draft")]
+        assert welcome.get("platform") == ("http://localhost:3000" if protocol == 3 else None)  # a 0.2.0 has no page
+        assert ("platform" in welcome) is (protocol == 3)
         (draft,) = (await listed(srv.http, ada, state="draft"))["apps"]
         path = f"/v1/apps/{draft['id']}"
         assert (await srv.http.post(f"{path}/approve", headers=ada.headers)).status_code == 200  # this process's link
@@ -204,6 +217,45 @@ async def test_a_rrotor_hears_the_catalogue_in_the_names_of_its_protocol(
         rejected = await elsewhere.http.post(f"{path}/reject", json=reason, headers=ada.headers)  # relayed from another
         assert rejected.status_code == 200, rejected.text
         assert (await receive(ws, one))["state"] == "rejected"
+
+
+async def test_the_catalogue_says_what_an_app_needs_and_the_rrotor_keeps_its_secrets_current(
+    client: httpx.AsyncClient, engine: AsyncEngine
+) -> None:
+    ada = await person(engine, "Enterprise")
+    rt = await self_runtime(engine, ada, HOST)
+    said = manifest(run_as="app", clis=["gh", "bq", "gh", "no spaces", 3], secrets=["GH_TOKEN", "DB_PASS", "$x"])
+    await publish(rt, deployed("deploy-failures", manifest=said, secrets_missing=["GH_TOKEN", "../etc"]))
+    (one,) = (await listed(client, ada, state="draft"))["apps"]
+    assert (one["run_as"], one["clis"], one["secrets"], one["secrets_missing"]) == (
+        "app",
+        ["gh", "bq"],
+        ["GH_TOKEN", "DB_PASS"],
+        ["GH_TOKEN"],
+    )
+    _, as_ada = await granted(engine, ada)
+    told = (await tool(client, as_ada, "apps", state="draft"))["content"][0]["text"]
+    assert (
+        "draft, by a deploy, runs as the app, CLIs gh, bq, secrets GH_TOKEN, DB_PASS, not set on the rrotor: GH_TOKEN: "
+        in told
+    )
+    async with server() as srv, linked(srv, rt) as ws:  # the admin set GH_TOKEN: the card is current, no new version
+        await ws.send_json({"type": "secrets", "id": "s1", "program": "deploy-failures", "missing": []})
+        assert (await receive(ws, "ack"))["of"] == "s1"
+        await ws.send_json({"type": "secrets", "id": "s2", "program": "nobody", "missing": ["X"]})  # no row: let go
+        assert (await receive(ws, "ack"))["of"] == "s2"
+    (one,) = (await listed(client, ada, state="draft"))["apps"]
+    assert (one["version"], one["secrets"], one["secrets_missing"]) == (1, ["GH_TOKEN", "DB_PASS"], [])
+    assert "not set" not in (await tool(client, as_ada, "apps", state="draft"))["content"][0]["text"]
+    await publish(rt, deployed("deploy-failures", 2, manifest=manifest(run_as="owner", clis="gh")))  # unknown: viewer
+    (two,) = (await listed(client, ada, state="draft"))["apps"]
+    assert (two["version"], two["run_as"], two["clis"], two["secrets"], two["secrets_missing"]) == (
+        2,
+        "viewer",
+        [],
+        [],
+        [],
+    )
 
 
 async def test_members_see_approved_apps_their_roles_allow_searched_filtered_and_paged(
@@ -317,3 +369,11 @@ def test_roles_types_and_urls() -> None:
     )
     assert catalogue.type_of({}) == "page" and catalogue.type_of({"type": "deck"}) == "deck"
     assert catalogue.type_of({"type": "Dashboard"}) == "page" and catalogue.type_of({"type": 3}) == "page"
+    assert catalogue.run_as_of({}) == "viewer" and catalogue.run_as_of({"run_as": "app"}) == "app"
+    assert catalogue.run_as_of({"run_as": "App"}) == "viewer" and catalogue.run_as_of({"run_as": None}) == "viewer"
+    assert catalogue.names_in("gh", 50) == [] and catalogue.names_in(None, 50) == []
+    assert catalogue.names_in(["gh", "gh", "clickhouse-client", "a b", "", 3, "x" * 65], 50) == [
+        "gh",
+        "clickhouse-client",
+    ]
+    assert catalogue.names_in([f"S{n}" for n in range(120)], 100) == [f"S{n}" for n in range(100)]

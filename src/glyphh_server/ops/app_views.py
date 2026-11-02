@@ -1,5 +1,6 @@
 """An app as the API and the connector show it (docs/specs/apps.md, 3.3): the row joined with its rrotor (name,
-address, mode) and the people who submitted and reviewed it, and `url`, where the app is."""
+address, mode) and the people who submitted and reviewed it, what it needs to run (`run_as`, `clis`, `secrets`,
+`secrets_missing`: names only), and `url`, where the app is."""
 
 import uuid
 from datetime import datetime
@@ -33,6 +34,10 @@ class AppView(BaseModel):
     commit_sha: str
     roles: list[str]
     state: str
+    run_as: str = Field(description="Whose standing its calls run with: viewer (each viewer's own) or app (its own)")
+    clis: list[str] = Field(description="The CLIs its functions use")
+    secrets: list[str] = Field(description="The secret names its manifest declares; never a value")
+    secrets_missing: list[str] = Field(description="Those not set on the rrotor when it last said")
     submitted_by: Person | None
     submitted_at: datetime
     reviewed_by: Person | None
@@ -70,6 +75,10 @@ COLUMNS = (
     App.commit_sha,
     App.roles,
     App.state,
+    App.run_as,
+    App.clis,
+    App.secrets,
+    App.secrets_missing,
     App.submitted_at,
     App.reviewed_at,
     App.reason,
@@ -116,6 +125,10 @@ def view(row: Row) -> AppView:
         commit_sha=row.commit_sha,
         roles=list(row.roles),
         state=row.state,
+        run_as=row.run_as,
+        clis=list(row.clis),
+        secrets=list(row.secrets),
+        secrets_missing=list(row.secrets_missing),
         submitted_by=_person(row, "submitter"),
         submitted_at=row.submitted_at,
         reviewed_by=_person(row, "reviewer"),

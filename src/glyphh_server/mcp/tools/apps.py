@@ -37,9 +37,22 @@ class Rejection(AppId):
     reason: str = Field(min_length=1, max_length=REASON_MAX, description="Why, for whoever published it")
 
 
+def _needs(a: AppView) -> str:
+    """What the app needs to run (docs/specs/apps.md, 4.7): who it runs as, its CLIs, its secrets, the missing named."""
+    parts = [f"runs as the {a.run_as}"]
+    if a.clis:
+        parts.append(f"CLIs {', '.join(a.clis)}")
+    if a.secrets:
+        parts.append(f"secrets {', '.join(a.secrets)}")
+    if a.secrets_missing:
+        parts.append(f"not set on the rrotor: {', '.join(a.secrets_missing)}")
+    return ", ".join(parts)
+
+
 def _line(a: AppView) -> str:
     who = a.submitted_by.name or a.submitted_by.email if a.submitted_by else "a deploy"
-    return f"{a.title} ({a.type}) v{a.version} on {a.runtime_name}, {a.state}, by {who}: {a.url} (id {a.id})"
+    where = f"v{a.version} on {a.runtime_name}, {a.state}, by {who}, {_needs(a)}"
+    return f"{a.title} ({a.type}) {where}: {a.url} (id {a.id})"
 
 
 async def list_apps(ctx: Context, args: Listing) -> Done:

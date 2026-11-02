@@ -37,6 +37,7 @@ from glyphh_server.ops.link.protocol import (
     Inbound,
     Ping,
     Pong,
+    Secrets,
     Usage,
     Welcome,
 )
@@ -53,6 +54,7 @@ class Context:
     engine: AsyncEngine
     hub: Hub
     signing_key: Ed25519PrivateKey | None = None  # signs the licence a self-hosted runtime's welcome carries
+    platform: str | None = None  # the platform's address (GLYPHH_PLATFORM_URL), carried by the welcome
 
 
 @dataclass(slots=True)
@@ -102,20 +104,22 @@ async def _run(ctx: Context, runtime: Runtime, link: Link) -> None:
 
 
 async def _welcome(ctx: Context, runtime: Runtime) -> Welcome:
-    """Every runtime's welcome carries the org's newest licence key (null: none). A local runtime's has no licence
-    (its mod hands one in); a self-hosted one's carries its runtime keys and its licence, with the licence's grace."""
+    """Every runtime's welcome carries the org's newest licence key (null: none), its apps, the org's reviewer groups
+    and the platform's address. A local runtime's has no licence (its mod hands one in); a self-hosted one's carries
+    its runtime keys and its licence, with the licence's grace."""
     async with ctx.engine.begin() as conn:
         await tenancy.enter(conn, runtime.org_id)
         license_key = await license_keys.newest(conn, runtime.org_id)
         apps = await catalogue.for_runtime(conn, runtime.id)
         reviewers = await catalogue.reviewer_groups(conn, runtime.org_id)
+        welcome = Welcome(license_key=license_key, apps=apps, reviewers=reviewers, platform=ctx.platform)
         if runtime.mode == "local":
-            return Welcome(license_key=license_key, apps=apps, reviewers=reviewers)
-        keys, licence = await hashes_for(conn, runtime.id), None
+            return welcome
+        welcome.keys = await hashes_for(conn, runtime.id)
         if ctx.signing_key is not None:
             stamp = Stamp(runtime.id, LINK, GRACE_DAYS)
-            licence = await sign_license(conn, ctx.signing_key, runtime.user_id, runtime.org_id, None, stamp)
-    return Welcome(licence=licence, license_key=license_key, keys=keys, apps=apps, reviewers=reviewers)
+            welcome.licence = await sign_license(conn, ctx.signing_key, runtime.user_id, runtime.org_id, None, stamp)
+    return welcome
 
 
 async def _heartbeat(link: Link, clock: Clock) -> None:
@@ -146,12 +150,12 @@ async def _read(ctx: Context, runtime: Runtime, link: Link, clock: Clock) -> Non
 
 async def _apply(ctx: Context, runtime: Runtime, link: Link, message: Inbound) -> bool:
     """Answer or record one message; False once the link is closed because it could not be recorded. A result or an
-    event (Passed) is acked and kept nowhere; a deployed app makes its catalogue row."""
+    event (Passed) is acked and kept nowhere; a deployed app makes its catalogue row; `secrets` updates one."""
     if isinstance(message, Ping | Pong | Ack):
         if isinstance(message, Ping):
             await link.send(Pong())
         return True
-    if isinstance(message, Usage | Deployed):
+    if isinstance(message, Usage | Deployed | Secrets):
         try:
             await _record(ctx, runtime, message)
         except Exception:
@@ -162,11 +166,13 @@ async def _apply(ctx: Context, runtime: Runtime, link: Link, message: Inbound) -
     return True
 
 
-async def _record(ctx: Context, runtime: Runtime, message: Usage | Deployed) -> None:
+async def _record(ctx: Context, runtime: Runtime, message: Usage | Deployed | Secrets) -> None:
     async with ctx.engine.begin() as conn:
         await tenancy.enter(conn, runtime.org_id)
         if isinstance(message, Deployed):
             await catalogue.catalogue_deployed(conn, runtime, message)
+        elif isinstance(message, Secrets):
+            await catalogue.catalogue_secrets(conn, runtime, message)
         elif await inbound.first_time(conn, runtime, message.seq):
             await reports.apply_usage(conn, runtime, message)
         else:

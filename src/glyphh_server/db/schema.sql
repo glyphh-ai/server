@@ -361,7 +361,8 @@ CREATE TABLE IF NOT EXISTS rrotors (
 );
 CREATE INDEX IF NOT EXISTS ix_rrotors_user_id ON rrotors (user_id);
 
--- apps: the catalogue of apps on an org's rrotors (docs/specs/apps.md), one row per app per rrotor
+-- apps: the catalogue of apps on an org's rrotors (docs/specs/apps.md), one row per app per rrotor; run_as, clis,
+-- secrets and secrets_missing are what it needs to run (names only, never a value), from the rrotor's own word
 CREATE TABLE IF NOT EXISTS apps (
     id UUID DEFAULT gen_random_uuid() NOT NULL,
     org_id UUID NOT NULL,
@@ -381,9 +382,14 @@ CREATE TABLE IF NOT EXISTS apps (
     reason TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+    run_as TEXT DEFAULT 'viewer' NOT NULL,
+    clis TEXT[] DEFAULT '{}'::text[] NOT NULL,
+    secrets TEXT[] DEFAULT '{}'::text[] NOT NULL,
+    secrets_missing TEXT[] DEFAULT '{}'::text[] NOT NULL,
     PRIMARY KEY (id),
     CONSTRAINT apps_state CHECK (state IN ('draft', 'approved', 'rejected', 'retired')),
     CONSTRAINT apps_type CHECK (type IN ('page', 'dashboard', 'doc', 'diagram', 'deck', 'design')),
+    CONSTRAINT apps_run_as CHECK (run_as IN ('viewer', 'app')),
     FOREIGN KEY(org_id) REFERENCES orgs (id) ON DELETE CASCADE,
     FOREIGN KEY(runtime_id) REFERENCES rrotors (id) ON DELETE CASCADE,
     FOREIGN KEY(submitted_by) REFERENCES users (id) ON DELETE SET NULL,

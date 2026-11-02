@@ -6,9 +6,10 @@ the one place the two differ, read by `for_protocol`, and nothing else branches 
 is closed 4426 (`upgrade_needed`). The protocol 2 names leave once no rrotor of 0.2.0 is heard any more.
 
 The link carries licensing, and the catalogue of apps: the hello (who the runtime is, the node it is), the welcome
-(the org's licence key, a self-hosted runtime's licence and runtime keys, the runtime's apps and the org's reviewer
-groups), `keys` when those change, `app` after each review (docs/specs/apps.md), and rrotor's `usage` (each runtime
-key's calls, its precedents) and `deployed` (an app's makes its catalogue row). rrotor may still send a `result` or
+(the org's licence key, a self-hosted runtime's licence and runtime keys, the runtime's apps, the org's reviewer
+groups and the platform's address), `keys` when those change, `app` after each review (docs/specs/apps.md), and
+rrotor's `usage` (each runtime key's calls, its precedents), `deployed` (an app's makes its catalogue row) and
+`secrets` (which of an app's declared secrets are not set, protocol 3). rrotor may still send a `result` or
 an `event`: the server keeps neither and acks each, so rrotor stops owing it. Every message is checked here; anything
 the models refuse is unreadable, logged and skipped, and the link stays. `usage` carries `seq`, one rising counter
 per runtime: the server acks each by its `id` and applies a `seq` once, so a replay after a reconnect is never
@@ -104,6 +105,16 @@ class Deployed(Message):
     repo: str | None = None
     manifest: dict[str, Any] | None = None
     by: str | None = None
+    secrets_missing: list[str] | None = None  # an app's declared secrets not set in rrotor's vault; absent: none
+
+
+class Secrets(Message):
+    """Protocol 3: a secret of an app was set or deleted on the rrotor, so the app's declared secrets still missing
+    are these (docs/specs/apps.md, 4.7). Updates the row's `secrets_missing` alone; a program with no row is let go."""
+
+    type: Literal["secrets"]
+    program: Name
+    missing: list[str] = []
 
 
 class Ping(Message):
@@ -119,7 +130,7 @@ class Ack(Message):
     of: Id
 
 
-Inbound = Annotated[Usage | Passed | Deployed | Ping | Pong | Ack, Field(discriminator="type")]
+Inbound = Annotated[Usage | Passed | Deployed | Secrets | Ping | Pong | Ack, Field(discriminator="type")]
 INBOUND: TypeAdapter[Inbound] = TypeAdapter(Inbound)
 
 
@@ -148,10 +159,12 @@ class Welcome(Message):
     keys: list[str] | None = None  # a self-hosted runtime's live runtime keys, as SHA-256s: what it checks bearers by
     apps: list[AppState] = []  # the catalogue's rows for this runtime (docs/specs/apps.md, 3.4)
     reviewers: list[str] = []  # the org's reviewer groups: who may open a draft to review it
+    platform: str | None = None  # the platform's address, so the rrotor's index page links a review there (protocol 3)
 
     def for_protocol(self, protocol: int) -> dict[str, Any]:
-        """The welcome with its list of apps under the name this protocol gives it, each app in its name too."""
-        frame = self.model_dump(mode="json", exclude={"apps"})
+        """The welcome with its list of apps under the name this protocol gives it, each app in its name too; a
+        protocol 2 frame has no `platform` (a 0.2.0 rrotor has no page to link from)."""
+        frame = self.model_dump(mode="json", exclude={"apps"} if protocol >= PROTOCOL else {"apps", "platform"})
         frame[NAMES[protocol][1]] = [app.for_protocol(protocol) for app in self.apps]
         return frame
 

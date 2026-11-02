@@ -31,6 +31,8 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 .pages{display:flex;gap:8px;align-items:center;justify-content:space-between;margin-top:12px}
 .empty{color:var(--color-text-secondary,GrayText);padding:12px 0}
 .bad{color:var(--color-text-danger,inherit)} [hidden]{display:none!important}
+.warn{color:var(--color-text-warning,light-dark(#b45309,#fbbf24))}
+.ask{display:flex;gap:8px;align-items:center;flex-wrap:wrap} .ask input{flex:1 1 140px}
 </style></head>
 <body>
 <h1>Org apps</h1>
@@ -81,6 +83,35 @@ async function call(name, args = {}) {
 
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
 
+function needs(a) {
+  // What the app needs to run: one dim line, only when it needs anything; a missing secret in the warning colour.
+  const asApp = a.run_as === "app", clis = a.clis || [], secrets = a.secrets || [], missing = a.secrets_missing || [];
+  if (!asApp && !clis.length && !secrets.length && !missing.length) return null;
+  const line = el("div", "sub needs", asApp ? "Runs as the app" : "Runs as the viewer");
+  if (clis.length) line.append(` · ${clis.join(", ")} (${asApp ? "signed in once by an admin" : "each viewer signs in"})`);
+  const named = [...new Set([...secrets, ...missing])];
+  if (named.length) {
+    line.append(" · secrets: ");
+    named.forEach((s, i) => {
+      if (i) line.append(", ");
+      line.append(missing.includes(s) ? el("span", "warn", `${s} not set on the rrotor`) : s);
+    });
+    if (missing.length && view.reviewer) line.append(" · set it with secret_set on the rrotor");
+  }
+  return line;
+}
+
+function ask(c, row, text, confirmLabel, withReason, done) {
+  // A question in the card (the host's sandbox has no prompt or confirm): a reason field when one is wanted.
+  const box = el("div", "ask");
+  const input = withReason ? el("input", "") : null;
+  if (input) { input.placeholder = text; input.setAttribute("aria-label", text); box.append(input); } else box.append(el("span", "sub", text));
+  const yes = el("button", "", confirmLabel); const no = el("button", "", "Cancel");
+  yes.onclick = () => { const reason = input ? input.value.trim() : ""; if (input && !reason) { input.focus(); return; } done(reason); };
+  no.onclick = () => { box.remove(); row.hidden = false; };
+  box.append(yes, no); row.hidden = true; c.append(box); (input || yes).focus();
+}
+
 function card(a) {
   const c = el("div", "card");
   const head = el("div", "head");
@@ -91,15 +122,16 @@ function card(a) {
   const chips = el("div", "chips");
   for (const r of a.roles.length ? a.roles : ["Everyone"]) chips.append(el("span", "chip", r));
   c.append(chips);
+  const need = needs(a); if (need) c.append(need);
   if (a.state === "rejected" && a.reason) c.append(el("div", "sub", `Rejected: ${a.reason}`));
   const row = el("div", "row");
   const open = el("button", "", "Open"); open.onclick = () => app.openLink({ url: a.url }); row.append(open);
   if (view.reviewer && a.state === "draft") {
     const ok = el("button", "", "Approve"); ok.onclick = () => act("app_approve", { app_id: a.id }); row.append(ok);
-    const no = el("button", "", "Reject"); no.onclick = () => { const reason = prompt("Why is it rejected?"); if (reason) act("app_reject", { app_id: a.id, reason }); }; row.append(no);
+    const no = el("button", "", "Reject"); no.onclick = () => ask(c, row, "Why is it rejected?", "Reject", true, (reason) => act("app_reject", { app_id: a.id, reason })); row.append(no);
   }
   if (view.reviewer && a.state === "approved") {
-    const off = el("button", "", "Retire"); off.onclick = () => { if (confirm(`Retire ${a.title}?`)) act("app_retire", { app_id: a.id }); }; row.append(off);
+    const off = el("button", "", "Retire"); off.onclick = () => ask(c, row, `Retire ${a.title}?`, "Retire", false, () => act("app_retire", { app_id: a.id })); row.append(off);
   }
   c.append(row);
   return c;

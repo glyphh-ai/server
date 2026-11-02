@@ -192,6 +192,11 @@ async def test_the_panel_is_listed_and_read_as_an_mcp_app(client: httpx.AsyncCli
         assert "__APP_JS__" not in read["text"] and "callServerTool" in read["text"]
     cards = (await rpc(client, auth, "resources/read", uri=APPS))["result"]["contents"][0]["text"]
     assert "app_approve" in cards and "openLink" in cards and 'call("apps"' in cards and "All types" in cards
+    for needs in ("Runs as the app", "Runs as the viewer", "each viewer signs in", "signed in once by an admin"):
+        assert needs in cards
+    assert "not set on the rrotor" in cards and "set it with secret_set on the rrotor" in cards and ".warn" in cards
+    for modal in ("<script src=", "prompt(", "confirm("):  # claude.ai's host: one page, no external script, no modal
+        assert modal not in cards
     for old in ("ui://glyphh/artifacts/1", "ui://glyphh/apps/0"):
         assert (await rpc(client, auth, "resources/read", uri=old))["error"]["code"] == -32602
     gone = await rpc(client, auth, "resources/read", uri="ui://glyphh/other")
