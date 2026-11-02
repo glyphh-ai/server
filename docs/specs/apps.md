@@ -240,13 +240,17 @@ state from `apps.json` (`unknown` with the link off, where `approved` is implied
 A `.jsx` or `.tsx` entry is what claude.ai's React artifacts are: one file with ES imports of `react`, `react-dom`,
 `recharts`, `lucide-react`, `d3`, `three`, `framer-motion`, `date-fns`, `lodash`, `papaparse`, `mathjs` or
 `@radix-ui/*`, Tailwind classes, a default export that is the component. rrotor serves it inside its React shell
-and builds nothing: an HTML page with an **import map** sending each of those packages to
-`https://cdn.jsdelivr.net/npm/<package>@<pinned major>/+esm` (`react` and `react-dom` pinned to the same version;
-`react-dom/client` too), the Tailwind CDN, and `@babel/standalone` from cdnjs transforming the entry in the browser
-(`<script type="text/babel" data-type="module" data-presets="react,typescript" src="./<entry>">`, with the
-TypeScript preset for `.tsx`); a trailer mounts the default export into `#root` with `createRoot`. A package the
-import map does not name fails in the browser as it would on claude.ai; the shell's pinned versions are one table
-in `rrotord/apps.py` (`REACT_PACKAGES`). The CSP above already allows the three CDN hosts.
+and builds nothing: an HTML page with an **import map** sending the React family (`react`, `react-dom`,
+`react-dom/client`, `react/jsx-runtime`, `recharts`, `lucide-react`, `framer-motion`, `@radix-ui/*`) to
+`https://esm.sh/<package>@<pinned major>?external=react,react-dom`, so the page holds **one** React (jsDelivr's
+`+esm` bundles each pin their own React, and hooks in a second copy fail), and the rest (`d3`, `three`, `date-fns`,
+`lodash`, `papaparse`, `mathjs`) to `https://cdn.jsdelivr.net/npm/<package>@<pinned major>/+esm`; the Tailwind CDN;
+and `@babel/standalone` from cdnjs transforming the entry in the browser. Babel's script tags have no module
+registry, so the entry's source is inlined in one `<script type="text/babel" data-type="module">` (presets the
+shell registers: the React preset with the automatic runtime, plus TypeScript for `.tsx`) with its `export default`
+rewritten to a binding and a trailer that mounts it into `#root` with `createRoot`; `</script` in the source is
+escaped. A package the import map does not name fails in the browser as it would on claude.ai; the pinned versions
+are one table in `rrotord/apps.py` (`REACT_PACKAGES`). The CSP's script and style hosts gain `esm.sh` for this.
 
 ### 4.5 Dashboards
 
