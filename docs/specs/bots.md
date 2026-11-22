@@ -314,7 +314,7 @@ a run answers 503 `anthropic_off`.
 | `POST /v1/bots/mascot` | `{prompt}` → `{mascot}`, safe SVG |
 | `GET /v1/bots/{slug}/gates` | Per gate: its precedents, how often it asked and was right |
 | `POST /v1/bots/{slug}/runs` | `{input}` → 202, the run queued (on a rrotor: `dispatched`); a live run already is `E_CONFLICT`; a bot whose rrotor is not linked is `E_CONFLICT` `rrotor_offline` |
-| `GET /v1/bots/{slug}/runs`, `GET /v1/bot-runs/{id}` | A run: `{id, bot_slug, status, input, output, error, log, data, question: {question, options, batch, answer_with, step, approval}, input_tokens, output_tokens, cost_micros, own_key, runs_on, kind, swarm_slug, created_at, started_at, finished_at}`; `runs_on` the rrotor it ran on (null: Glyphh cloud); `kind` `bot` (a swarm's pull request in the approvals queue is `swarm`, section 10) |
+| `GET /v1/bots/{slug}/runs`, `GET /v1/bot-runs/{id}` | A run: `{id, bot_slug, status, input, output, error, log, data, question: {question, options, batch, answer_with, step, approval}, input_tokens, output_tokens, cost_micros, own_key, runs_on, kind, project_slug, created_at, started_at, finished_at}`; `runs_on` the rrotor it ran on (null: Glyphh cloud); `kind` `bot` (a project's pull request in the approvals queue is `project`, section 10) |
 | `POST /v1/bots/runs/{id}/tool` | A bot on a rrotor calls a tool: bearer its run's tool token, `{tool, input, run_id?}` → `{result}` or `{error}` |
 | `POST /v1/bot-runs/{id}/answer` | `{answer}` (an option; for a batch `N=option`, `rest=option` or a map) → 202; one that does not fit is 422 |
 | `POST /v1/bot-runs/{id}/wrong` | `{outcome, gate?, item?}` → `{gate, said, now}`, learned as a precedent |
@@ -413,57 +413,114 @@ rrotor too): it is never a person, so a rrotor cannot answer its own run's appro
 
 Not yet: who in the org may use a connection or a bot.
 
-## 10. Swarms (built)
+## 10. Projects (built)
 
-A swarm is Glyphh Bot's crew (glyphh-bot, `src/renderer/src/engine.ts`, `swarm()`) on the server: the org's bots, in
-speaking order, taking turns on one GitHub repo, on one of the org's rrotors (never on Glyphh cloud), each turn a pull
-request. `swarms`: `slug` (from its name, kept), `name`, `repo_url` (`https://github.com/<owner>/<name>`),
-`base_branch` (`main`), `members` (1 to 8 of the org's bot ids, each once, in order), `rounds` (1 to 10), `review`
-(`each_turn`, the default: each pull request waits for the person; `auto`: merged as it opens) and `runs_on` (the
-rrotor; deleting it deletes its swarms).
+A project (a swarm, until 2026-11-22) is a crew of the org's bots, in no order, working on one GitHub repo from a set
+of instructions, one bot at a time, each turn a pull request. There is no speaking order and there are no rounds: on
+its turn a bot reads the repo as it stands and the instructions, and the run goes on until the crew or its
+orchestrator says it is done, or a safety cap is reached. It runs headless; nothing is spoken unless someone is
+watching and has asked for it. `projects`: `slug` (from its name, kept), `name`, `repo_url`
+(`https://github.com/<owner>/<name>`), `base_branch` (`main`), `members` (1 to 8 of the org's bot ids, each once, a
+set), `instructions` (the brief given on the project, at most 20,000 characters) and `instructions_path`
+(`PROJECT.md`: the file in the repo that holds more, read on every turn when it is there), `turn_mode`, `orchestrator`,
+`review`, `runs_on`, `max_turns` (30; 1 to 200), `max_spend_cents` (none: no cap) and `narrate`.
 
-**A run** (`ops/swarms/`): `POST /v1/swarms/{slug}/runs {task}` is refused while the rrotor is not linked (409
-`rrotor_offline`), without the org's GitHub token (404 `github_key`), with no bot of the crew left (422 `members`), or
-while the swarm has a run going (409). Then, for each round and each bot in order, a turn: a call of rrotor's built-in
-`glyphh_swarm` (`turn`: a fresh branch `turn-<n>-<bot>-<stamp>` off the base, Claude Code doing the bot's part with
-the rrotor's `ANTHROPIC_API_KEY`, committed as the bot and opened as a pull request; `{repo, base, branch, prompt,
-persona, model, bot_id, bot_name, github_token}`). The words each turn is told (`ops/swarms/turns.py`: the prompt,
-the transcript of the last fourteen things said, the persona, the branch, the DONE rule) are Glyphh Bot's, character
-for character, as rrotor's `programs/glyphh_swarm/swarm_turns.py` has them (the same file, and the same tests). A
-server bot's card for them: its name, they/them, its summary as its task, its agent's prompt as its personality, and
-its cat's parts as its look. The bots are read again at each turn, so an edit made while the swarm runs is picked up;
-a bot of the crew deleted since ends the run, `failed`.
+- **Turns** (`turn_mode`). `wait` (wait your turn, the default): one bot at a time; the turn is offered to the bot
+  that has waited longest and has not just said it has nothing to do, never the bot that just went while another can
+  go; a bot with nothing to do changes nothing and says `PASS`, and the turn moves on. `orchestrator`: before each
+  turn the orchestrator (`orchestrator`: a bot of the crew, in its own voice and on its model; none: Claude, on the
+  bots' default model) reads the repo and the instructions and answers `{"next": <a bot>, "why": ..., "done": ...}`:
+  the bot it names takes the turn and is told why; an answer that names nobody of the crew is taken as wait your turn
+  takes it; `done` ends the run.
+- **The end.** A run is `done` (`ended` says why) when two bots in a row say `DONE` on a line of its own (a crew of
+  one: one), or the whole crew in a row had nothing to do (`ended: done`); when its orchestrator says so
+  (`orchestrator`); or at a safety cap: `max_turns` turns taken (`max_turns`), or its turns' tokens at Anthropic's rate
+  reaching `max_spend_cents` (`max_spend`).
+- **Review** (`review`). `each_turn` (the default): each pull request waits for the person's merge or reject before
+  the next turn. `end`: the run has a branch of its own (`project-<slug>-<stamp>`, made off the base through GitHub's
+  API as it starts); every turn starts from it and is merged into it as it opens; when the run is over, one pull
+  request of it all, into the base, waits for the person (merged: the run is `done`; rejected or not mergeable: it is
+  `failed`, saying so). A run that merged nothing opens none. (`auto`, merged as it opens with no review, is gone:
+  the migration reads it as `end`.)
+- **Narrate when watched** (`narrate`): kept as chosen. The server makes no speech; the platform reads a turn aloud
+  only while someone has the project open and this is on.
+- **Where it runs** (`runs_on`): none, **Glyphh cloud**, or one of the org's rrotors (a rrotor deleted puts its
+  projects on the cloud). Glyphh cloud has fewer tools than a rrotor: bots read and change files and open pull
+  requests, but run no commands, tests or browser.
 
-Each turn's result comes back up the link as a bot run's does, taken once (`swarm_turns.remote_seq`, from the run's
-rrotor alone). A turn with changes is `open` (`pr_url`, `number`, `head_sha`, `files`, `said`, `title`): with
+**A run** (`ops/projects/`): `POST /v1/projects/{slug}/runs {task}` (`task` may be empty: the crew works from the
+instructions alone) is refused without the org's GitHub token (404 `github_key`), with no bot of the crew left (422
+`members`), while the project has a run going (409), while its rrotor is not linked (409 `rrotor_offline`), or on
+Glyphh cloud with neither the org's Anthropic key nor Glyphh's (503 `anthropic_off`). A run begins with its project's
+turn mode, review and caps. Nothing waits on the server: each step's result moves the run on (`engine.py`, `next`).
+A step is a bot's `turn` (its branch `turn-<n>-<bot>-<stamp>`) or the orchestrator's `pick`; one step of a run is out
+at a time (`project_turns_one_out`). The words every step is told (`turns.py`: the instructions, the file to read,
+the task, the crew, the transcript of the last fourteen things said, the persona, the PASS and DONE rules, the
+orchestrator's question) are the same module as rrotor's `programs/glyphh_swarm/swarm_turns.py`, with the same tests.
+A server bot's card for them: its name, they/them, its summary as its task, its agent's prompt as its personality,
+and its cat's parts as its look. The bots are read again at each step, so an edit made while the project runs is
+picked up; a bot of the crew deleted since ends the run, `failed`.
+
+**On a rrotor** (`steps.py`, `results.py`): each step is a call of rrotor's built-in `glyphh_swarm` (it keeps its
+name: rrotors in the field know it by it). `turn` `{repo, base, branch, prompt, persona, model, bot_id, bot_name,
+github_token}`: a fresh branch off the base, Claude Code doing the bot's part in a checkout with the rrotor's
+`ANTHROPIC_API_KEY`, committed as the bot and opened as a pull request. `pick` `{repo, base, prompt, persona, model,
+github_token}` (rrotor 0.6: an older rrotor fails the run, saying to update it or use wait your turn): Claude Code
+reading the checkout, changing nothing, answering who goes next. Each result comes back up the link as a bot run's
+does, taken once (`project_turns.remote_seq`, from the run's rrotor alone), with its `usage` (tokens). **Content
+stays on the machine:** the server keeps a turn's status, tokens and pointers (branch, pull request, call) and what
+the bot said at its end (the next turn's transcript), as it did for swarms; the orchestrator's reasons are used for
+the next turn's words and not kept.
+
+**On Glyphh cloud** (`cloud.py`, `claude.py`, `repo.py`): no code runs in the cloud, so there is no shell, no checkout
+and no browser. A step is a task of the server's own process: the bot's Claude step (Anthropic's Messages API, on the
+org's own key or Glyphh's, let in by the meter and each request charged as a bot's agent steps are) with the repo as
+its tools, through GitHub's REST API with the org's GitHub token: `list_files {under?}`, `read_file {path}`,
+`write_file {path, content}` and `delete_file {path}` (a file at most 400 kB, text only; at most 60 files changed a
+turn; 60 requests a step). What it wrote is held until the turn ends, then committed once on the turn's branch as
+the bot (git's data API: a tree on the base's, a commit, the branch made and moved) and opened as a pull request with
+each file's lines added and removed; a turn that changed nothing opens none. The orchestrator's `pick` has the two
+reading tools only. Pull requests are merged, closed and their branches deleted by the server through the same API. A
+cloud turn does not use the bot's connections or `fetch`, and cannot run or test what it wrote: choose a rrotor for
+that. Its turns' content is on Glyphh's side already, so the orchestrator's reasons (`why`) are kept. When the
+machine running a cloud step starts again, its runs with a step out are failed (`interrupted by a restart`); one
+waiting on the person is left waiting.
+
+**A turn's result.** A turn with changes is `open` (`pr_url`, `number`, `head_sha`, `files`, `said`, `title`): with
 `each_turn` the run `needs_input` and the pull request waits in the approvals queue (`GET /v1/bot-approvals`, beside
-the bots' runs, `kind: "swarm"`: "Merge PR #<n> by <bot>?", `merge` or `reject`), answered with `POST
-/v1/swarm-runs/{id}/answer {answer}` (a call of `merge`: `merged`, or `conflict` left open with its reason; or of
-`reject`: closed, `rejected`); with `auto`, merged at once. A turn with no changes is `unchanged`. Then the DONE rule:
-a bot that says DONE on its own last line is kept, any other turn empties the row; two in a row (or a crew of one's
-one) ends the run `done`, as does the last round. A turn that fails (`{status: failed, data.reason}`), or a call that
-cannot go (the rrotor not linked, a turn too big), ends the run `failed`, saying why. Cancelled (`POST
-/v1/swarm-runs/{id}/cancel`), the turn out on the rrotor is stopped (`cancel`) and the run `failed` `cancelled`; an
-open pull request stays open on GitHub.
+the bots' runs, `kind: "project"`: "Merge PR #<n> by <bot>?", `merge` or `reject`), answered with `POST
+/v1/project-runs/{id}/answer {answer}` (`merged`, or `conflict` left open with its reason; or closed, `rejected`);
+with `end`, merged at once into the run's branch, and the run's own pull request waits at the end ("Merge PR #<n>,
+the whole run?"). A turn with no changes is `unchanged`. A step that fails (`{status: failed, data.reason}`), or a
+call that cannot go (the rrotor not linked, a turn too big), ends the run `failed`, saying why. Cancelled (`POST
+/v1/project-runs/{id}/cancel`), the step out is stopped (the rrotor's `cancel`, or the cloud task) and the run
+`failed` `cancelled`; an open pull request stays open on GitHub. Each turn keeps its `input_tokens`, `output_tokens`
+and `cost_micros` (its tokens at Anthropic's rate for its bot's model: what the spend cap counts); a rrotor's turns
+run on the org's own key there and put nothing on the meter.
 
-**The org's GitHub token** (`ops/swarms/github.py`, `github_keys`): a fine-grained token the person makes (the repos'
-contents and pull requests, read and write), set on the platform with `PUT /v1/github-key {token}`, tried with GitHub
-(`GET /user`: its login), kept sealed, shown by its last four characters and its login, sent with each call (in git's
-environment on the rrotor, never kept there). Not the org's GitHub connection: Pipedream runs a connection's actions
-but gives no token out for an account signed in through its own OAuth app, and git needs one. Not the Glyphh GitHub
-App: it is installed per person and mints read-only tokens.
-
-A swarm's turns run on the org's own Anthropic key on its rrotor and report no tokens: nothing goes on the meter.
+**The org's GitHub token** (`ops/projects/github.py`, `github_keys`): a fine-grained token the person makes (the
+repos' contents and pull requests, read and write), set on the platform with `PUT /v1/github-key {token}`, tried with
+GitHub (`GET /user`: its login), kept sealed, shown by its last four characters and its login; used by the server for
+a cloud step and the review at the end, and sent with each call to a rrotor (in git's environment there, never
+kept). Not the org's GitHub connection: Pipedream runs a connection's actions but gives no token out for an account
+signed in through its own OAuth app, and git needs one. Not the Glyphh GitHub App: it is installed per person and
+mints read-only tokens.
 
 | Call | What |
 |---|---|
-| `GET`/`POST /v1/swarms`, `GET`/`PATCH`/`DELETE /v1/swarms/{slug}` | A swarm: `{id, slug, name, repo_url, base_branch, members: [{id, slug, name}], rounds, review, runs_on, created_at, updated_at}`; a slug taken is `E_CONFLICT`; deleting it deletes its runs |
-| `POST /v1/swarms/{slug}/runs` | `{task}` → 202, its run: `{id, swarm_slug, task, status, rounds, review, runs_on, error, turns: [{n, round, bot_id, bot_slug, bot_name, branch, status, said, title, pr_url, number, head_sha, files, done, error, created_at, finished_at}], created_at, finished_at}` |
-| `GET /v1/swarms/{slug}/runs`, `GET /v1/swarm-runs/{id}` | Its runs, the newest first (the last 50); one run |
-| `POST /v1/swarm-runs/{id}/answer` | `{answer: merge \| reject}` → 202; a run not waiting is `E_CONFLICT` |
-| `POST /v1/swarm-runs/{id}/cancel` | The run ended, its turn out stopped; one ended already is `E_CONFLICT` |
+| `GET`/`POST /v1/projects`, `GET`/`PATCH`/`DELETE /v1/projects/{slug}` | A project: `{id, slug, name, repo_url, base_branch, members: [{id, slug, name}], instructions, instructions_path, turn_mode: wait \| orchestrator, orchestrator, review: each_turn \| end, runs_on, max_turns, max_spend_cents, narrate, created_at, updated_at}`; a slug taken is `E_CONFLICT`; an orchestrator not of the crew is 422 `orchestrator`; `PATCH` with `runs_on`, `orchestrator` or `max_spend_cents` null clears it; deleting it deletes its runs |
+| `POST /v1/projects/{slug}/runs` | `{task}` (may be empty) → 202, its run: `{id, project_slug, task, status, ended, turn_mode, review, runs_on, max_turns, max_spend_cents, work_branch, pr_url, number, error, turns: [{n, bot_id, bot_slug, bot_name, branch, status, picked_by, why, said, title, pr_url, number, head_sha, files, done, error, input_tokens, output_tokens, cost_micros, created_at, finished_at}], input_tokens, output_tokens, cost_micros, created_at, finished_at}`; a turn's `status` is `picking` (the orchestrator choosing; `bot_slug` empty), `running`, `open`, `unchanged`, `merging`, `merged`, `conflict`, `rejecting`, `rejected`, `failed` or `cancelled` |
+| `GET /v1/projects/{slug}/runs`, `GET /v1/project-runs/{id}` | Its runs, the newest first (the last 50); one run |
+| `POST /v1/project-runs/{id}/answer` | `{answer: merge \| reject}` → 202: the turn's pull request that waits, or with review `end` the whole run's; a run not waiting is `E_CONFLICT` |
+| `POST /v1/project-runs/{id}/cancel` | The run ended, its step out stopped; one ended already is `E_CONFLICT` |
 | `GET`/`PUT`/`DELETE /v1/github-key` | `{set, hint, login, set_at}`; `PUT` takes `{token}`, one GitHub does not take is 422 `token` |
 
-The connector's tools: `swarms`, `swarm`, `swarm_create`, `swarm_update`, `swarm_delete`, `swarm_run`, `swarm_runs`,
-`swarm_run_get`, `swarm_run_answer`, `swarm_run_cancel`; a swarm's pull request also shows in `bot_approvals`. The
-GitHub token is set on the platform only, never through the chat.
+The connector's tools: `projects`, `project`, `project_create`, `project_update`, `project_delete`, `project_run`,
+`project_runs`, `project_run_get`, `project_run_answer`, `project_run_cancel` (offered with or without rrotor: a
+project runs on Glyphh cloud too); a project's pull request also shows in `bot_approvals`. The GitHub token is set on
+the platform only, never through the chat.
+
+**The old names.** Every route also answers at its swarm path (`/v1/swarms…`, `/v1/swarm-runs…`), out of the spec:
+the same answers in the project's shape (the list under both `projects` and `swarms`), a body's `rounds` left out and
+its review `auto` read as `end`. Each tool is still called by its swarm name (`swarms`, `swarm`, `swarm_create`, …),
+never listed. The tables were renamed with their rows (`0023_projects.sql`).

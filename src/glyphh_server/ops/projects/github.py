@@ -1,6 +1,7 @@
-"""The org's GitHub token for its swarms (docs/specs/bots.md, 10): a swarm's turns clone its repo, push each turn's
-branch and open, merge or close its pull request with it, on the rrotor (sent with each call, in git's environment
-there, never kept). The org saves it here, sealed (ops/auth/sealed.py), as it saves its Anthropic key: a GitHub token
+"""The org's GitHub token for its projects (docs/specs/bots.md, 10): a project's turns read its repo, push each turn's
+branch and open, merge or close its pull request with it: on Glyphh cloud through GitHub's API (ops/projects/repo.py),
+on a rrotor with git (sent with each call, in git's environment there, never kept). The org saves it here, sealed
+(ops/auth/sealed.py), as it saves its Anthropic key: a GitHub token
 the person makes (a fine-grained one: the repos, contents and pull requests, read and write), tried with GitHub
 before it is kept and shown only by its last four characters and the account it is.
 
@@ -20,11 +21,11 @@ from glyphh_server.errors import Invalid, NotFound
 from glyphh_server.models import GitHubKey
 from glyphh_server.ops.auth.principal import Principal
 from glyphh_server.ops.auth.sealed import seal, unseal
-from glyphh_server.ops.swarms.views import GitHubKeyView
+from glyphh_server.ops.projects.views import GitHubKeyView
 
 USER: str = "https://api.github.com/user"
 NO_KEY: str = (
-    "Save the org's GitHub token first (PUT /v1/github-key): a swarm's turns push and open pull requests with it."
+    "Save the org's GitHub token first (PUT /v1/github-key): a project's turns push and open pull requests with it."
 )
 Check = Callable[[str], Awaitable[str]]  # a token tried with GitHub: the account's login, or Invalid
 
