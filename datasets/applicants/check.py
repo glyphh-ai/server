@@ -6,6 +6,7 @@ uv run --with python-docx --with pypdf python datasets/applicants/check.py --out
 
 import argparse
 import email
+import email.policy
 import json
 import random
 from collections import Counter
@@ -30,7 +31,7 @@ def opens(root: Path, rows: list[dict]) -> Counter:
                 elif key.endswith("pdf"):
                     assert len(PdfReader(path).pages) >= 1
                 else:
-                    msg = email.message_from_bytes(path.read_bytes())
+                    msg = email.message_from_bytes(path.read_bytes(), policy=email.policy.default)
                     assert msg["From"] and len(list(msg.iter_attachments())) == 2
             except Exception:  # noqa: BLE001 - any failure to open is the finding
                 failed[key] += 1
