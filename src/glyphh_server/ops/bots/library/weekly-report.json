@@ -32,7 +32,7 @@
     },
     "loop": [
       {"id": "merged", "run": "github-search-issues-and-pull-requests", "input": {"query": "$input"}},
-      {"id": "report", "agent": "Write this week's report from these merged pull requests: $merged.ret.items",
+      {"id": "report", "agent": "Write this week's report from these merged pull requests: $merged.ret",
        "skill": "report", "remember": true,
        "schema": {"type": "object", "required": ["title", "highlights", "body"],
                   "properties": {"title": {"type": "string"}, "highlights": {"type": "string"}, "body": {"type": "string"}}}},

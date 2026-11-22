@@ -10,6 +10,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Query, Request, Response
 
+from glyphh_server.api import bot_decisions
 from glyphh_server.api.auth import Cfg, Conn
 from glyphh_server.api.key_auth import KeyCaller as Caller
 from glyphh_server.api.key_auth import KeyPerson as Person
@@ -33,6 +34,7 @@ from glyphh_server.ops.bots.views import (
 from glyphh_server.ops.swarms import runs as swarm_runs
 
 router = APIRouter(tags=["bots"])
+router.include_router(bot_decisions.router)  # its decisions, read and trained (docs/specs/bots.md, 11)
 
 
 def _bots(request: Request) -> Any:

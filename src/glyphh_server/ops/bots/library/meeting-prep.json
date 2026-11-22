@@ -31,7 +31,7 @@
     },
     "loop": [
       {"id": "events", "run": "google_calendar-list-events", "input": {"calendarId": "primary", "timeMin": "today", "timeMax": "tomorrow"}},
-      {"id": "prep", "gate": "prep", "each": "$events.ret.items", "label": "summary", "key": "id",
+      {"id": "prep", "gate": "prep", "each": "$events.ret", "label": "summary", "key": "id",
        "on": {"empty:prep": "end"}},
       {"id": "briefs", "agent": "Write a brief for each of these meetings: $prep.prep", "skill": "brief",
        "schema": {"type": "object", "properties": {"title": {"type": "string"}, "content": {"type": "string"}},

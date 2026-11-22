@@ -33,7 +33,7 @@
     },
     "loop": [
       {"id": "tickets", "run": "gmail-find-email", "input": {"q": "to:support newer_than:1h"}},
-      {"id": "urgency", "gate": "urgency", "each": "$tickets.ret.messages", "label": "subject", "key": "id",
+      {"id": "urgency", "gate": "urgency", "each": "$tickets.ret", "label": "subject", "key": "id",
        "on": {"empty:urgent": "end"}},
       {"id": "post", "agent": "Write the Slack post for these urgent tickets: $urgency.urgent", "skill": "urgent-post"},
       {"id": "slack", "run": "slack-send-message", "approval": "post the urgent tickets to Slack",

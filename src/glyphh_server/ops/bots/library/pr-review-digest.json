@@ -32,7 +32,7 @@
     },
     "loop": [
       {"id": "prs", "run": "github-search-issues-and-pull-requests", "input": {"query": "$input"}},
-      {"id": "today", "gate": "today", "each": "$prs.ret.items", "label": "title", "key": "id",
+      {"id": "today", "gate": "today", "each": "$prs.ret", "label": "title", "key": "id",
        "on": {"empty:today": "end"}},
       {"id": "digest", "agent": "Write the review digest of these pull requests: $today.today", "skill": "digest"},
       {"id": "slack", "run": "slack-send-message", "approval": "post your review digest to Slack",

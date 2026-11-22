@@ -467,3 +467,52 @@ A swarm's turns run on the org's own Anthropic key on its rrotor and report no t
 The connector's tools: `swarms`, `swarm`, `swarm_create`, `swarm_update`, `swarm_delete`, `swarm_run`, `swarm_runs`,
 `swarm_run_get`, `swarm_run_answer`, `swarm_run_cancel`; a swarm's pull request also shows in `bot_approvals`. The
 GitHub token is set on the platform only, never through the chat.
+
+## 11. Decisions: read them, train the gates (built)
+
+Every decision a bot's gates make, one row per item per gate per run, is copied from the runner's state (its
+`runs.sqlite`, the newest 5,000) into `bot_decisions` after each go, on the cloud and back from a rrotor alike
+(`ops/bots/decided.py`), so a person (or Claude, through the connector) can read, search, sort and page them and train
+the gates from them. The runner's own columns are copied each time (upserted on bot, run, gate, step, item number and
+key); what only the server knows (`confirmed`, `precedent`, its precedent's id in the gate's Ada model) is never
+overwritten. A state that is not the runner's database copies nothing.
+
+**Readable** (`ops/bots/readable.py`): an item's `fields` are its values flattened to `name: text` (nested names joined
+with a dot, a start every name shares left off, lists of plain values joined; at most 40, each at most 2,000
+characters), and its `label` is a title drawn from them: the runner's label unless it is JSON (the SDK falls back to a
+JSON dump), else its first `title`, `subject`, `summary`, `name`, `headline`, `label`, `snippet`, `text` or `body`,
+else its first three fields; never raw JSON. `who` is `ada` (its gate's model, sure enough, or its guess in code),
+`you` (the person was asked) or `default`. `now` is what it is: the correction when it was corrected (a relabel, or
+what the world said), else the outcome.
+
+**Training** goes through the gate's Ada model the way `wrong` does, as a go of the runner, so the bot must be idle
+(409 otherwise): a relabel grades the decision's precedent with the new outcome (or records it, when it was never one)
+and marks it corrected; a confirm records it as it is (or as corrected) and marks it `confirmed`; a case added by hand
+is recorded with its outcome and kept as a decision of kind `case`; forgetting a precedent forgets it in Ada and drops
+it from the decisions (a hand-made case is deleted). Many at once must be of one gate (422 `gate`). Reading one
+decision asks its gate for the nearest precedents now (up to 8, nearest first, each with its item's label when it is
+one of the bot's); a backtest replays the newest decisions through the gates as they stand now and says which would
+change, or be asked, without touching anything.
+
+| Call | What |
+|---|---|
+| `GET /v1/bots/{slug}/decisions` | `?q=` (each word a prefix, all of them), `gate`, `outcome` (what it is now), `who`, `corrected`, `since`, `until`, `run_id`, `sort` (`time`, the default, `confidence`, `gate`, `outcome`), `order` (`desc`), `cursor`, `limit` (25, at most 100) → `{decisions: [{id, run_id, gate, step, key, kind, label, fields, outcome, now, who, mode, confidence, guess, recorded, corrected, confirmed, outcomes, at}], total, next_cursor, gates}`; a cursor not one of its own is 422 `cursor` |
+| `GET /v1/bots/{slug}/decisions/stats` | `?gate=&days=` (30, at most 365) → per gate: decisions, by whom, corrected, confirmed, `ask_rate`, `agreement` (Ada's guess against the person's answer), `accuracy` (Ada's calls the person checked), and the same day by day |
+| `GET /v1/bot-decisions/{id}` | One, with its `case` and its nearest `precedents` `[{id, outcome, similarity, label, decision_id}]` |
+| `POST /v1/bot-decisions/{id}/relabel`, `/confirm` | `{outcome}` (one of its gate's, else 422 `outcome`); none → `{decisions, precedents, said}` |
+| `POST /v1/bots/{slug}/decisions/relabel`, `/confirm` | `{ids, outcome}`, `{ids}`: up to 200 of one gate |
+| `POST /v1/bots/{slug}/cases` | `{gate, outcome, item \| case, label}` → 201, the gate's precedents |
+| `DELETE /v1/bots/{slug}/gates/{gate}/precedents/{id}` | `{gate, id, precedents}` |
+| `POST /v1/bots/{slug}/backtest` | `{gate, limit}` (50, at most 200) → `{replayed, same, changed: [{decision, then, now, ask}], would_ask, right_now}` |
+
+The connector's tools: `bot_decisions` (search, filter, sort, page), `bot_decision` (one, with its precedents),
+`bot_gate_stats` and `bot_backtest` read only; `bot_relabel`, `bot_relabel_many` and `bot_forget_case` change what a
+gate learned (destructive); `bot_confirm` and `bot_add_case` add to it. Each answers in lines a person reads (`[skip]
+Lunch on Friday? (gate worth, by Ada 92%; …)`), never JSON.
+
+**A tool's answer is its list.** The marketplace's templates read a Pipedream action's answer at `$step.ret`, where its
+list is: GitHub's Search Issues and Pull Requests and Google Calendar's List Events answer a list, and Gmail's Find
+Email a list too, but `{messages, truncated, note}` when cut to fit, which `ops/bots/props.py` (`returned`) turns into
+the list (the note kept as `ret_note`). The templates had read `$prs.ret.items`, `$merged.ret.items`,
+`$events.ret.items`, `$mail.ret.messages` and `$tickets.ret.messages`: a gate saw no items, `empty:` ended the run and
+no agent step ran, so its 0 tokens were right. Migration 0023 rewrites those paths in the bots installed from them.

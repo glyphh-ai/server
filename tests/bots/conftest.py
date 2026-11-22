@@ -49,7 +49,7 @@ INBOX: dict[str, Any] = {
     },
     "loop": [
         {"id": "mail", "run": "gmail-find-email", "input": {"q": "$input"}},
-        {"id": "worth", "gate": "worth", "each": "$mail.ret.messages", "label": "subject", "key": "id",
+        {"id": "worth", "gate": "worth", "each": "$mail.ret", "label": "subject", "key": "id",
          "on": {"empty:answer": "end"}},
         {"id": "draft", "agent": "Write one reply to: $worth.answer", "skill": "replies"},
         {"id": "send", "run": "gmail-send-email", "approval": "send the reply",

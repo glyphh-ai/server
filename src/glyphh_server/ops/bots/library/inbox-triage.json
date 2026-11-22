@@ -30,7 +30,7 @@
     },
     "loop": [
       {"id": "mail", "run": "gmail-find-email", "input": {"q": "is:unread newer_than:1d"}},
-      {"id": "worth", "gate": "worth", "each": "$mail.ret.messages", "label": "subject", "key": "id",
+      {"id": "worth", "gate": "worth", "each": "$mail.ret", "label": "subject", "key": "id",
        "on": {"empty:read": "end"}},
       {"id": "digest", "agent": "Write the digest of these emails: $worth.read", "skill": "digest"},
       {"id": "send", "run": "gmail-send-email", "approval": "email you the digest",
