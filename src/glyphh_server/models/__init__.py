@@ -20,7 +20,7 @@ from glyphh_server.models.oauth_code import OAuthCode
 from glyphh_server.models.org import BILLING_STATUSES, Org
 from glyphh_server.models.org_sso import OrgSso, SsoDomain
 from glyphh_server.models.plan import Plan, PlanVersion
-from glyphh_server.models.project import GitHubKey, Project, ProjectRun, ProjectTurn
+from glyphh_server.models.project import Project, ProjectRun, ProjectTurn, RunMark
 from glyphh_server.models.rrotor import MODES, Rrotor
 from glyphh_server.models.runtime_key import RuntimeKey
 from glyphh_server.models.staff import SEVERITIES, AdminAudit, OpsEvent
@@ -66,7 +66,6 @@ __all__ = [
     "ConnectorToken",
     "DeviceCode",
     "GitHubInstallation",
-    "GitHubKey",
     "GitHubTrafficDay",
     "GitHubTrafficRepo",
     "GitHubTrafficTop",
@@ -90,6 +89,7 @@ __all__ = [
     "ProjectRun",
     "ProjectTurn",
     "Rrotor",
+    "RunMark",
     "RuntimeKey",
     "SsoDomain",
     "Template",

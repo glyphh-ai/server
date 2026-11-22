@@ -28,6 +28,9 @@ Branch = Annotated[str, AfterValidator(_branch)]
 RepoPath = Annotated[str, AfterValidator(_path)]
 Review = Literal["each_turn", "end"]
 TurnMode = Literal["wait", "orchestrator"]
+Effort = Literal["low", "medium", "high"]
+MODEL_ABOUT: str = "This run's model for every step (GET /v1/bots/models); none: each bot's own"
+EFFORT_ABOUT: str = "This run's effort for every step: low, medium or high; none: each bot's own"
 REPO_ABOUT: str = "The GitHub repo the crew works in: https://github.com/<owner>/<name>"
 MEMBERS_ABOUT: str = "The crew: the org's bots by id, in no order (1 to 8)"
 BRIEF_ABOUT: str = "The project's instructions, given here: every bot reads them, and the repo, on its turn"
@@ -74,6 +77,7 @@ class ProjectView(BaseModel):
     max_turns: int = Field(description=TURNS_ABOUT)
     max_spend_cents: int | None = Field(description=SPEND_ABOUT)
     narrate: bool = Field(description=NARRATE_ABOUT)
+    github_connected: bool = Field(description="Glyphh's GitHub App is connected for its repo (a run connects it)")
     created_at: datetime
     updated_at: datetime
 
@@ -121,6 +125,8 @@ class ProjectPatch(BaseModel):
 class TaskIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     task: str = Field("", max_length=20_000, description="What the crew is to do now; none: its instructions alone")
+    model: str | None = Field(None, description=MODEL_ABOUT)
+    effort: Effort | None = Field(None, description=EFFORT_ABOUT)
 
 
 class TurnView(BaseModel):
@@ -165,6 +171,8 @@ class ProjectRunView(BaseModel):
     runs_on: uuid.UUID | None = Field(description="The rrotor it runs on; none: Glyphh cloud")
     max_turns: int
     max_spend_cents: int | None
+    model: str | None = Field(description=MODEL_ABOUT)
+    effort: Effort | None = Field(description=EFFORT_ABOUT)
     work_branch: str | None = Field(description="With review end: the run's own branch its turns merge into")
     pr_url: str | None = Field(description="With review end: the pull request of the whole run, once it is open")
     number: int | None
@@ -184,15 +192,3 @@ class ProjectRuns(BaseModel):
 class ReviewIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     answer: Literal["merge", "reject"] = Field(description="The open pull request merged, or closed")
-
-
-class GitHubKeyIn(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    token: str = Field(min_length=20, max_length=500, description="A GitHub token: contents and pull requests, write")
-
-
-class GitHubKeyView(BaseModel):
-    set: bool = Field(description="The org's projects push and open pull requests with its GitHub token")
-    hint: str = Field(description="Its last four characters")
-    login: str = Field(description="The GitHub account it is")
-    set_at: datetime | None

@@ -1,5 +1,6 @@
 """The org's projects (docs/specs/bots.md, 10): a crew of its bots, in no order, on one GitHub repo and a set of
-instructions, on Glyphh cloud or one of its rrotors, each turn a pull request; the org's GitHub token the turns use.
+instructions, on Glyphh cloud or one of its rrotors, each turn a pull request; and the crew's project for a workspace,
+found or made for the Bots screen. GitHub is the Glyphh GitHub App's (api/github.py): there is no token to save.
 Projects were swarms: every route also answers at its old path (/v1/swarms, /v1/swarm-runs), out of the spec. And
 the bots' tool callback: a bot running on a rrotor calls its tools here, with its run's tool token."""
 
@@ -9,14 +10,13 @@ from typing import Any
 from fastapi import APIRouter, Request, Response
 from pydantic import ValidationError
 
-from glyphh_server.api.auth import Bearer, Caller, Cfg, Conn
+from glyphh_server.api.auth import Bearer, Caller, Conn
 from glyphh_server.api.templates import Person
 from glyphh_server.errors import Invalid, Unauthorized
 from glyphh_server.ops.bots import remote_in, tool_calls
-from glyphh_server.ops.projects import github, runs, store
+from glyphh_server.ops.projects import crew, runs, store
+from glyphh_server.ops.projects.crew import CrewIn
 from glyphh_server.ops.projects.views import (
-    GitHubKeyIn,
-    GitHubKeyView,
     ProjectIn,
     ProjectPatch,
     ProjectRuns,
@@ -65,6 +65,15 @@ async def create_project(body: ProjectIn, caller: Caller, conn: Conn) -> Project
     return await store.create(conn, caller, body)
 
 
+@router.put("/v1/projects/crew", operation_id="putCrewProject")
+async def put_crew_project(body: CrewIn, request: Request, who: Caller, conn: Conn) -> ProjectView:
+    """The crew's project for a workspace (a GitHub repo and branch), found or made, and set to the bots and crew
+    settings given: the Bots screen's, which never names a project. GitHub is connected for the repo: 404
+    github_app_missing, with `install_url`, while Glyphh's GitHub App is not installed on it; 403 github_not_linked
+    or github_no_write when the person has no GitHub sign-in, or cannot push to the repo."""
+    return await crew.put(conn, who, _projects(request).github, body)
+
+
 @router.post("/v1/swarms", status_code=201, **OLD)
 async def create_swarm(body: dict[str, Any], caller: Caller, conn: Conn) -> ProjectView:
     return await store.create(conn, caller, _was(body, ProjectIn))
@@ -100,9 +109,10 @@ async def delete_project(slug: str, caller: Caller, conn: Conn) -> Response:
 @router.post("/v1/projects/{slug}/runs", operation_id="runProject", status_code=202)
 async def run_project(slug: str, body: TaskIn, request: Request, who: Person) -> ProjectRunView:
     """A run of the project, on a task or on its instructions alone: its first step sent where it runs (409 while one
-    is live or its rrotor is offline; 404 github_key without the org's GitHub token; 503 anthropic_off on Glyphh
-    cloud with no Anthropic key)."""
-    return await _projects(request).start(who, slug, body.task)  # type: ignore[no-any-return]
+    is live or its rrotor is offline; 404 github_app_missing, with `install_url`, while Glyphh's GitHub App is not
+    installed on its repo; 503 anthropic_off on Glyphh cloud with no Anthropic key). `model` and `effort` are this
+    run's, for every step."""
+    return await _projects(request).start(who, slug, body.task, body.model, body.effort)  # type: ignore[no-any-return]
 
 
 @router.get("/v1/swarms/{slug}/runs", **OLD)
@@ -130,23 +140,6 @@ async def answer_project_run(run_id: uuid.UUID, body: ReviewIn, request: Request
 async def cancel_project_run(run_id: uuid.UUID, request: Request, who: Person) -> ProjectRunView:
     """The run ended; its step out stopped (an open pull request stays open)."""
     return await _projects(request).cancel(who, run_id)  # type: ignore[no-any-return]
-
-
-@router.get("/v1/github-key", operation_id="getGitHubKey")
-async def get_github_key(caller: Caller, conn: Conn) -> GitHubKeyView:
-    return github.view(await github.get(conn))
-
-
-@router.put("/v1/github-key", operation_id="setGitHubKey")
-async def set_github_key(body: GitHubKeyIn, request: Request, who: Caller, conn: Conn, settings: Cfg) -> GitHubKeyView:
-    """The org's GitHub token, tried with GitHub, then kept sealed: its projects commit and open pull requests with
-    it."""
-    return await github.put(conn, who, settings.secret_key, body.token, _projects(request).check_github)
-
-
-@router.delete("/v1/github-key", operation_id="removeGitHubKey")
-async def remove_github_key(caller: Caller, conn: Conn) -> GitHubKeyView:
-    return await github.remove(conn, caller.org_id)
 
 
 @router.post("/v1/bots/runs/{run_id}/tool", operation_id="callBotTool")

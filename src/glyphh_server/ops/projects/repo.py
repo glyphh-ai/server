@@ -1,4 +1,4 @@
-"""A project's repo through GitHub's REST API, with the org's GitHub token (docs/specs/bots.md, 10): what a turn on
+"""A project's repo through GitHub's REST API, with a turn's GitHub token (docs/specs/bots.md, 10): what a turn on
 Glyphh cloud has in place of a checkout. Read: a branch's head, its tree, a file. Write: a branch made, one commit of
 a turn's changes on it (git's data API: a tree on the base's, a commit, the branch moved), a pull request opened,
 merged or closed, a branch deleted. No code is run and nothing is cloned. A failure is Unavailable, saying what GitHub

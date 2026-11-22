@@ -1,5 +1,5 @@
 """A project's step on Glyphh cloud (docs/specs/bots.md, 10). No code runs in the cloud: there is no shell, no checkout
-and no browser, so a bot's turn here is its Claude step with the repo as tools, through GitHub's API with the org's
+and no browser, so a bot's turn here is its Claude step with the repo as tools, through GitHub's API with the turn's
 token (ops/projects/repo.py): list_files, read_file, write_file, delete_file. What it wrote is held until the turn
 ends, then committed once on the turn's branch as the bot and opened as a pull request; a turn that changed nothing
 opens none. The orchestrator's pick has the two reading tools only. Each answers as rrotor's glyphh_swarm does
@@ -120,7 +120,7 @@ async def _asked(svc: Any, run: Any, inputs: dict[str, Any], tools: list[dict[st
     repo = await svc.repo_of(run)
     work = Work(repo, await repo.head(inputs["base"]), tools)
     claude, metered = await svc.claude_of(run.org_id, inputs["model"])
-    said = await converse(claude, metered, inputs["persona"], inputs["prompt"], tools, work.call)
+    said = await converse(claude, metered, (inputs["persona"], inputs["prompt"]), tools, work.call, run.effort)
     return repo, work, said
 
 

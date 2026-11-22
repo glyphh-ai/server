@@ -1,9 +1,10 @@
 """Projects (docs/specs/bots.md, 10): a crew of the org's bots, in no order, on one GitHub repo and a set of
 instructions, taking turns one at a time (wait your turn, or an orchestrator picks), each turn a pull request, on
 Glyphh cloud (the repo through GitHub's API) or on one of the org's rrotors (glyphh_swarm: Claude Code in a checkout);
-a project's runs and each run's turns; and the org's GitHub token, sealed, that the turns commit and open pull requests
-with. A turn's work is on GitHub (and, for a rrotor's, on the rrotor): its row keeps its status, tokens and pointers
-(its branch, pull request, call), and what the bot said at its end."""
+a project's runs and each run's turns; and a person's marks on the runs in their recents. GitHub is reached through
+the Glyphh GitHub App: a project keeps the installation that covers its repo, never a token. A turn's work is on
+GitHub (and, for a rrotor's, on the rrotor): its row keeps its status, tokens and pointers (its branch, pull request,
+call), and what the bot said at its end."""
 
 import uuid
 from datetime import datetime
@@ -59,6 +60,8 @@ class Project(Base):
     max_turns: Mapped[int] = mapped_column(Integer, server_default="30")
     max_spend_cents: Mapped[int | None] = mapped_column(Integer)
     narrate: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    # the installation of Glyphh's GitHub App that covers the repo, once a person connected it (ops/projects/github.py)
+    github_installation_id: Mapped[int | None] = mapped_column(BigInteger)
 
 
 class ProjectRun(Base):
@@ -97,6 +100,8 @@ class ProjectRun(Base):
     number: Mapped[int | None] = mapped_column(Integer)
     on_cloud: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     machine: Mapped[str | None] = mapped_column(Text)
+    model: Mapped[str | None] = mapped_column(Text)  # this run's model for every step; none: each bot's own
+    effort: Mapped[str | None] = mapped_column(Text)  # low, medium or high; none: each bot's own
 
 
 class ProjectTurn(Base):
@@ -142,16 +147,13 @@ class ProjectTurn(Base):
     cost_micros: Mapped[int] = mapped_column(BigInteger, server_default="0")
 
 
-class GitHubKey(Base):
-    """The org's GitHub token, sealed: a project's turns commit and open pull requests with it (on Glyphh cloud
-    through GitHub's API; sent to a rrotor with each call, never kept there). Shown by its last four characters and
-    the account it is."""
+class RunMark(Base):
+    """A person's own mark on a run in their recents (a bot's run or a project's, by its id): pinned, archived."""
 
-    __tablename__ = "github_keys"
+    __tablename__ = "run_marks"
 
-    org_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("orgs.id", ondelete="CASCADE"), primary_key=True)
-    token: Mapped[str] = mapped_column(Text)  # sealed (ops/auth/sealed.py)
-    hint: Mapped[str] = mapped_column(Text)
-    login: Mapped[str] = mapped_column(Text)
-    set_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
-    set_at: Mapped[datetime] = created_at()
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    run_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    org_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("orgs.id", ondelete="CASCADE"))
+    pinned: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    archived: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))

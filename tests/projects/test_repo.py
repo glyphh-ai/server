@@ -147,5 +147,7 @@ async def test_claude_is_asked_with_the_steps_tools(monkeypatch: pytest.MonkeyPa
         "messages": [{"role": "user", "content": "Go"}],
         "tools": tools,
     }
+    await claude.create("You are Ada.", [], tools, "low")  # a run's effort goes with the request, when it has one
+    assert asked[1]["output_config"] == {"effort": "low"} and "output_config" not in asked[0]
     with pytest.raises(Unavailable, match="Claude did not answer: overloaded"):
         await claude.create("fail", [], tools)

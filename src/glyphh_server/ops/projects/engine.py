@@ -21,9 +21,11 @@ from glyphh_server.models.project import TURN_OUT
 from glyphh_server.ops.bots import prices
 from glyphh_server.ops.bots.goes import NO_KEY
 from glyphh_server.ops.bots.runs import now
+from glyphh_server.ops.github_app import load_key
 from glyphh_server.ops.link.hub import Hub
-from glyphh_server.ops.projects import final, github, runs, store, turns
+from glyphh_server.ops.projects import final, runs, store, turns
 from glyphh_server.ops.projects.claude import Claude
+from glyphh_server.ops.projects.github import GitHub
 from glyphh_server.ops.projects.repo import Repo
 
 GONE: str = "A bot of the crew was deleted: the project cannot go on."
@@ -38,13 +40,9 @@ class Engine:
     def __init__(self, bots: Any, hub: Hub, http: httpx.AsyncClient) -> None:
         self.bots, self.engine, self.settings, self.hub, self.http = bots, bots.engine, bots.settings, hub, http
         self.tasks: dict[uuid.UUID, asyncio.Task[None]] = {}  # a run's step on Glyphh cloud
-        self.check_github: github.Check = github.checker(http)  # a token tried with GitHub (a test sets a fake)
+        self.github = GitHub(http, self.settings, load_key(self.settings))  # the Glyphh GitHub App: a turn's token
         self.repo_for: Any = lambda token, repo: Repo(http, token, repo)  # the repo by GitHub's API (a test's fake)
         self.claude_for: Any = Claude  # Claude with tools, by key and model (a test sets a fake)
-
-    @property
-    def secret(self) -> str:
-        return str(self.settings.secret_key)
 
     async def put_run(self, org_id: uuid.UUID, run_id: uuid.UUID, **values: Any) -> None:
         async with self.engine.begin() as conn:
@@ -68,11 +66,9 @@ class Engine:
             await conn.execute(update(ProjectTurn).where(*out).values(**values))
 
     async def repo_of(self, run: Any) -> Any:
-        """The run's repo through GitHub's API, with the org's token."""
-        async with self.engine.begin() as conn:
-            await tenancy.enter(conn, run.org_id)
-            token = await github.token(conn, self.secret)
-        return self.repo_for(token, store.repo(run.repo_url))
+        """The run's repo through GitHub's API, with a token minted now for it alone (one hour)."""
+        repo = store.repo(run.repo_url)
+        return self.repo_for(await self.github.token(run.github_installation_id, repo), repo)
 
     async def claude_of(self, org_id: uuid.UUID, model: str) -> tuple[Any, Any]:
         """Claude for a step on Glyphh cloud, on the org's own key or Glyphh's, and its meter: the step let in once
@@ -100,7 +96,8 @@ class Engine:
         async with self.engine.begin() as conn:
             await tenancy.enter(conn, run.org_id)
             by = turn.bot_id or run.orchestrator
-            model = (await conn.execute(select(Bot.model).where(Bot.id == by))).scalar() or prices.DEFAULT
+            own = (await conn.execute(select(Bot.model).where(Bot.id == by))).scalar()
+            model = run.model or own or prices.DEFAULT
             more = {
                 "input_tokens": ProjectTurn.input_tokens + spent[0],
                 "output_tokens": ProjectTurn.output_tokens + spent[1],

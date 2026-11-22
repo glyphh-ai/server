@@ -21,6 +21,7 @@ OF_PROJECT: tuple[Any, ...] = (
     Project.slug.label("project_slug"),
     Project.name.label("project_name"),
     *(Project.repo_url, Project.base_branch, Project.instructions, Project.instructions_path, Project.orchestrator),
+    Project.github_installation_id,
 )
 
 

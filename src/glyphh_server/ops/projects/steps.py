@@ -1,9 +1,9 @@
 """A project's steps, sent where its run runs (docs/specs/bots.md, 10): a bot's `turn` and the orchestrator's `pick`,
 each told the words ops/projects/turns.py has (the project's instructions, the file in the repo that holds more, the
 person's task, what has been said). On a rrotor, a call of its built-in glyphh_swarm over the link (Claude Code in a
-checkout, the org's GitHub token with the call); on Glyphh cloud, a task of this process (ops/projects/cloud.py: the
-repo through GitHub's API, no code run). A server bot's card for the words: its name, they/them, its summary as its
-task and its agent's prompt as its personality; its look in words from its cat."""
+checkout, a GitHub token of the Glyphh GitHub App for that call); on Glyphh cloud, a task of this process
+(ops/projects/cloud.py: the repo through GitHub's API, no code run). A server bot's card for the words: its name,
+they/them, its summary as its task and its agent's prompt as its personality; its look in words from its cat."""
 
 import asyncio
 import logging
@@ -16,7 +16,7 @@ from glyphh_server.models import ProjectTurn
 from glyphh_server.ops.bots import prices
 from glyphh_server.ops.bots.runs import machine
 from glyphh_server.ops.link import calls
-from glyphh_server.ops.projects import cloud, github, turns
+from glyphh_server.ops.projects import cloud, turns
 from glyphh_server.ops.projects.engine import Engine
 from glyphh_server.ops.projects.store import repo
 
@@ -45,12 +45,12 @@ def about(run: Any, taken: list[Any], crew: list[Any], ids: bool = False) -> str
 
 class Steps(Engine):
     async def send(self, run: Any, call_id: uuid.UUID, function: str, inputs: dict[str, Any]) -> None:
-        """One call of glyphh_swarm on the run's rrotor (the org's GitHub token added); the run failed, saying why,
-        when it cannot go."""
+        """One call of glyphh_swarm on the run's rrotor, handed a GitHub token minted for this call alone (the
+        project's repo, one hour: its clone, push and pull request); the run failed, saying why, when it cannot go."""
         try:
-            async with self.engine.begin() as conn:
-                await tenancy.enter(conn, run.org_id)
-                inputs = {**inputs, "repo": repo(run.repo_url), "github_token": await github.token(conn, self.secret)}
+            name = repo(run.repo_url)
+            token = await self.github.token(run.github_installation_id, name)
+            inputs = {**inputs, "repo": name, "github_token": token}
             calls.fits(inputs, "The turn")
             if not await calls.call(self.hub, run.rrotor_id, call_id, PROGRAM, function, inputs):
                 await self.end(run.org_id, run.id, "failed", calls.offline(PLACE))
@@ -103,7 +103,7 @@ class Steps(Engine):
         values |= {"picked_by": "orchestrator" if why else "wait", "why": why if run.on_cloud else ""}
         turn_id = await self._row(run.org_id, picking.id if picking is not None else None, values)
         inputs = {"base": run.work_branch or run.base_branch, "branch": branch, "prompt": prompt}
-        inputs |= {"persona": turns.persona(card(bot), look(bot)), "model": bot.model}
+        inputs |= {"persona": turns.persona(card(bot), look(bot)), "model": run.model or bot.model}
         await self.step(run, turn_id, call_id, "turn", inputs | {"bot_id": bot.slug, "bot_name": bot.name})
 
     async def pick(self, run: Any, taken: list[Any], crew: list[Any]) -> None:
@@ -116,5 +116,5 @@ class Steps(Engine):
         inputs = {"base": run.work_branch or run.base_branch}
         inputs["prompt"] = turns.pick_prompt(about(run, taken, crew, ids=True), n, by_tools=run.on_cloud)
         inputs["persona"] = turns.persona(card(lead), look(lead)) if lead else ""
-        inputs["model"] = lead.model if lead else prices.DEFAULT
+        inputs["model"] = run.model or (lead.model if lead else prices.DEFAULT)
         await self.step(run, turn_id, call_id, "pick", inputs)

@@ -30,10 +30,13 @@ class Claude:
 
         self.client, self.model = anthropic.AsyncAnthropic(api_key=key, max_retries=2), model
 
-    async def create(self, system: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> Any:
+    async def create(
+        self, system: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]], effort: str | None = None
+    ) -> Any:
         import anthropic
 
         asked = {"model": self.model, "max_tokens": MAX_TOKENS, "system": system, "messages": messages}
+        asked |= {"output_config": {"effort": effort}} if effort else {}  # a run's effort: low, medium or high
         try:
             return await self.client.messages.create(**asked, tools=tools)
         except anthropic.APIError as err:
@@ -47,14 +50,16 @@ def _block(b: Any) -> dict[str, Any]:
 
 
 async def converse(
-    claude: Any, metered: Metered, system: str, prompt: str, tools: list[dict[str, Any]], call: Call
+    claude: Any, metered: Metered, words: tuple[str, str], tools: list[dict[str, Any]], call: Call, effort: Any = None
 ) -> Said:
-    """The step's conversation: Claude asked, its tool calls run and answered, until it says its piece."""
+    """The step's conversation (`words`: its system prompt and its prompt): Claude asked, its tool calls run and
+    answered, until it says its piece."""
+    system, prompt = words
     messages: list[dict[str, Any]] = [{"role": "user", "content": prompt}]
     said = Said("")
 
     async def ask() -> Any:
-        return await claude.create(system, messages, tools)
+        return await claude.create(system, messages, tools, effort)
 
     for _ in range(ROUNDS):
         reply = await metered(ask)

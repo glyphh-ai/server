@@ -1,9 +1,9 @@
 """The org's projects' runs (app.state.bots.projects): started (a task given, or the instructions alone; refused
-without the org's GitHub token, with no bot left in the crew, while its rrotor is not linked, or on Glyphh cloud with
-no Anthropic key to run on), a pull request that waits answered (a turn's, or with review end the whole run's), and a
-run cancelled (its step out stopped; an open pull request stays open on GitHub). The steps' results move a run on
-(ops/projects/results.py). At the server's start, this machine's runs on Glyphh cloud that a step was out for are
-failed: their tasks went with the process."""
+while Glyphh's GitHub App is not installed on its repo, with no bot left in the crew, while its rrotor is not linked,
+or on Glyphh cloud with no Anthropic key to run on), a pull request that waits answered (a turn's, or with review end
+the whole run's), and a run cancelled (its step out stopped; an open pull request stays open on GitHub). The steps'
+results move a run on (ops/projects/results.py). At the server's start, this machine's runs on Glyphh cloud that a
+step was out for are failed: their tasks went with the process."""
 
 import asyncio
 import uuid
@@ -14,13 +14,14 @@ from sqlalchemy.exc import IntegrityError
 
 from glyphh_server.db import tenancy
 from glyphh_server.errors import Conflict, GlyphhError, Invalid, Unavailable
-from glyphh_server.models import ProjectRun, ProjectTurn
+from glyphh_server.models import Project, ProjectRun, ProjectTurn
 from glyphh_server.models.project import TURN_OUT
 from glyphh_server.ops.auth.principal import Principal
+from glyphh_server.ops.bots import prices
 from glyphh_server.ops.bots.goes import NO_KEY
 from glyphh_server.ops.bots.runs import INTERRUPTED, now
 from glyphh_server.ops.link import calls
-from glyphh_server.ops.projects import final, github, runs, store
+from glyphh_server.ops.projects import final, runs, store
 from glyphh_server.ops.projects.engine import now_stamp
 from glyphh_server.ops.projects.results import Results
 from glyphh_server.ops.projects.views import ProjectRunView
@@ -44,7 +45,7 @@ class Projects(Results):
             project = await store.row(conn, slug)
             if project.runs_on is not None:
                 await calls.linked(conn, project.runs_on)
-            await github.token(conn, self.secret)
+            await self._connected(conn, who, project)
             crew = [str(b.id) for b in await store.crew(conn, project.members)]
         if project.runs_on is None and not self.settings.anthropic_api_key and not await self.bots.own_key(who.org_id):
             raise Unavailable(NO_KEY, reason="anthropic_off")
@@ -52,10 +53,21 @@ class Projects(Results):
             raise Invalid("The project's crew has no bot left: add one.", reason="members")
         return project, crew
 
-    async def start(self, who: Principal, slug: str, task: str) -> ProjectRunView:
+    async def _connected(self, conn: Any, who: Principal, project: Any) -> None:
+        """GitHub for the project's repo: the installation of Glyphh's App that covers it now (not found, with the
+        install link, when none does), connected by this person when it is not the one the project has."""
+        repo = store.repo(project.repo_url)
+        if await self.github.app().covering(repo) != project.github_installation_id:
+            found = await self.github.connect(conn, who.user_id, repo)
+            await conn.execute(update(Project).where(Project.id == project.id).values(github_installation_id=found))
+
+    async def start(
+        self, who: Principal, slug: str, task: str, model: Any = None, effort: Any = None
+    ) -> ProjectRunView:
         project, crew = await self._ready(who, slug)
         stamp, cloud = now_stamp(), project.runs_on is None
         values = {"org_id": who.org_id, "project_id": project.id, "user_id": who.user_id, "task": task.strip()}
+        values |= {"model": prices.model(model).id if model else None, "effort": effort}
         values |= {"members": crew, "rrotor_id": project.runs_on, "stamp": stamp, "on_cloud": cloud}
         values |= {k: getattr(project, k) for k in BEGAN}
         values["work_branch"] = final.work_branch(project.slug, stamp) if project.review == "end" else None

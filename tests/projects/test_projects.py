@@ -1,26 +1,35 @@
 """The org's projects (docs/specs/bots.md, 10): a crew of its bots, in no order, on one GitHub repo and a set of
-instructions; made, changed and deleted; the org's GitHub token; and a run on one of the org's rrotors: each step a
-call of glyphh_swarm there (a turn, the orchestrator's pick, a merge or a reject), wait your turn or the
+instructions; made, changed and deleted; and a run on one of the org's rrotors: each step a call of glyphh_swarm
+there (a turn, the orchestrator's pick, a merge or a reject) with a GitHub token minted for it, wait your turn or the
 orchestrator's choice, until the crew is done or a safety cap is reached. The old swarm paths still answer."""
 
 import uuid
 from typing import Any
 
-import httpx
 import pytest
 from sqlalchemy import delete, update
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from glyphh_server.errors import Invalid
 from glyphh_server.models import Bot, ProjectRun, Rrotor
 from glyphh_server.ops.link import calls
 from glyphh_server.ops.link.protocol import Call, Cancel
-from glyphh_server.ops.projects import github
 from glyphh_server.ops.projects.results import Results
 from tests.bots.remote import OnRrotor, online, rrotor_fixture  # noqa: F401 (the fixture)
 from tests.db.helpers import person
 from tests.link import self_runtime
-from tests.projects.helpers import REPO, TOKEN, answer, body, picked, project, run_of, start, turned
+from tests.projects.helpers import (
+    INSTALLATION,
+    REPO,
+    answer,
+    body,
+    github_of,
+    picked,
+    project,
+    run_of,
+    signs_in_with_github,
+    start,
+    turned,
+)
 from tests.projects.helpers import crew_on_rrotor as _on
 
 
@@ -106,45 +115,34 @@ async def test_a_project_still_answers_at_a_swarms_paths(on_rrotor: OnRrotor, en
     assert (await r.s.http.delete("/v1/swarms/site-crew", headers=ada.headers)).status_code == 204
 
 
-async def test_the_orgs_github_token_is_tried_kept_sealed_and_removed(
-    on_rrotor: OnRrotor,
-    engine: AsyncEngine,
-) -> None:
-    ada, _, _ = await _on(on_rrotor, engine, key=False)
-    http = on_rrotor.s.http
-    shown = (await http.get("/v1/github-key", headers=ada.headers)).json()
-    assert shown == {"set": False, "hint": "", "login": "", "set_at": None}
-    bad = await http.put("/v1/github-key", json={"token": TOKEN + "bad"}, headers=ada.headers)
-    assert bad.status_code == 422 and bad.json()["error"]["reason"] == "token"
-    await http.put("/v1/github-key", json={"token": TOKEN}, headers=ada.headers)
-    again = await http.put("/v1/github-key", json={"token": TOKEN[:-4] + "abcd"}, headers=ada.headers)
-    assert again.json()["set"] is True and again.json()["hint"] == "abcd" and TOKEN not in again.text
-    assert (await http.delete("/v1/github-key", headers=ada.headers)).json()["set"] is False
-
-
-async def test_github_is_asked_who_a_token_is() -> None:
-    def said(request: httpx.Request) -> httpx.Response:
-        if request.headers["authorization"].endswith("down"):
-            raise httpx.ConnectError("no route")
-        if request.headers["authorization"].endswith("good"):
-            return httpx.Response(200, json={"login": "acme-bot"})
-        return httpx.Response(401, json={"message": "Bad credentials"})
-
-    async with httpx.AsyncClient(transport=httpx.MockTransport(said)) as http:
-        check = github.checker(http)
-        assert await check("t-good") == "acme-bot"
-        for token, why in (("t-bad", "does not take"), ("t-down", "did not answer")):
-            with pytest.raises(Invalid, match=why):
-                await check(token)
+async def test_the_pasted_github_token_is_gone(on_rrotor: OnRrotor, engine: AsyncEngine) -> None:
+    ada, _, _ = await _on(on_rrotor, engine)
+    for method in ("GET", "PUT", "DELETE"):
+        res = await on_rrotor.s.http.request(method, "/v1/github-key", headers=ada.headers)
+        assert res.status_code == 404, res.text
 
 
 async def test_a_run_is_refused_until_it_can_go(on_rrotor: OnRrotor, engine: AsyncEngine) -> None:
     r = on_rrotor
     ada, rt, bots = await _on(r, engine, key=False)
-    await project(r.s, ada, bots, runs_on=str(rt.id))
+    made = await project(r.s, ada, bots, runs_on=str(rt.id))
+    assert made["github_connected"] is False
     res = await start(r.s, ada)
-    assert res.status_code == 404 and res.json()["error"]["reason"] == "github_key"
-    await r.s.http.put("/v1/github-key", json={"token": TOKEN}, headers=ada.headers)
+    said = res.json()["error"]
+    assert res.status_code == 404 and said["reason"] == "github_app_missing", res.text
+    assert (
+        said["install_url"] == "https://github.com/apps/glyphh-test/installations/new"
+        and "acme/site" in said["message"]
+    )
+    gh = github_of(r.s)
+    gh.install("acme/site", INSTALLATION)
+    res = await start(r.s, ada)
+    assert res.status_code == 403 and res.json()["error"]["reason"] == "github_not_linked", res.text
+    account = await signs_in_with_github(engine, ada, "ada-gh")
+    gh.logins |= dict([account])
+    res = await start(r.s, ada)
+    assert res.status_code == 403 and res.json()["error"]["reason"] == "github_no_write", res.text
+    gh.install("acme/site", INSTALLATION, account)
     async with engine.begin() as conn:
         await conn.execute(delete(Bot).where(Bot.org_id == ada.org_id))
     res = await start(r.s, ada)
@@ -167,7 +165,12 @@ async def test_wait_your_turn_on_a_rrotor_each_pull_request_waits(on_rrotor: OnR
     to, first = r.hub.sent[-1]
     assert to == rt.id and isinstance(first, Call) and (first.program, first.function) == ("glyphh_swarm", "turn")
     given = first.inputs
-    assert given["repo"] == "acme/site" and given["github_token"] == TOKEN and given["base"] == "main"
+    assert given["repo"] == "acme/site" and given["base"] == "main"
+    minted = github_of(r.s).tokens[given["github_token"]]  # the turn's own token: this repo, and no more than it needs
+    assert minted["installation"] == INSTALLATION and minted["repos"] == ["acme/site"]
+    assert minted["permissions"] == {"contents": "write", "pull_requests": "write", "metadata": "read"}
+    shown = (await r.s.http.get("/v1/projects/site-crew", headers=ada.headers)).json()
+    assert shown["github_connected"] is True
     assert given["branch"].startswith("turn-1-ada-cat-") and given["bot_name"] == "Ada Cat"
     assert "your own look: round, wide" in given["persona"]
     assert given["prompt"].startswith("PROJECT INSTRUCTIONS:\nShip a landing page.\n\nThe repo may hold more")

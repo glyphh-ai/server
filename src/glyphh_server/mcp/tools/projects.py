@@ -1,8 +1,9 @@
 """The org's projects (docs/specs/bots.md, 10): a crew of its bots, in no order, on one GitHub repo and a set of
 instructions, on Glyphh cloud or one of its rrotors, each turn a pull request; made, read, changed, deleted, run, its
-pull request merged or rejected, its run cancelled. The org's GitHub token is set on the platform (PUT
-/v1/github-key), never through the chat. The tools that start or move a run make their own transactions (DETACHED).
-Projects were swarms: each tool is still called by its old name (WAS), never listed."""
+pull request merged or rejected, its run cancelled. GitHub is reached through the Glyphh GitHub App, installed on the
+repo in the browser (the platform's Connect GitHub); there is no token to give. The tools that start or move a run
+make their own transactions (DETACHED). Projects were swarms: each tool is still called by its old name (WAS), never
+listed."""
 
 import uuid
 
@@ -83,7 +84,7 @@ async def delete(ctx: Context, args: Slug) -> Done:
 
 
 async def run(ctx: Context, args: Task) -> Done:
-    made = await ctx.bots.projects.start(ctx.who, args.slug, args.task)
+    made = await ctx.bots.projects.start(ctx.who, args.slug, args.task, args.model, args.effort)
     return Done(f"{run_line(made)}\nproject_run_get follows it.", dump(made))
 
 
@@ -120,7 +121,8 @@ CREATE: str = (
     "whole run at its end) and runs_on: none for Glyphh cloud, or one of the org's rrotors (bot_places). Glyphh "
     "cloud has fewer tools than a rrotor: bots read and change files and open pull requests, but run no commands, "
     "tests or browser. There are no rounds: a run goes until the crew or the orchestrator says it is done, or "
-    "max_turns or max_spend_cents is reached. The org needs its GitHub token (set on the platform)."
+    "max_turns or max_spend_cents is reached. Glyphh's GitHub App must be installed on the repo, by a person who "
+    "can push to it (Connect GitHub on the platform): a run says so, with the link, when it is not."
 )
 TOOLS: tuple[Tool, ...] = (
     _tool(

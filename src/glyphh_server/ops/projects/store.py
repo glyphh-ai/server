@@ -18,7 +18,7 @@ from glyphh_server.ops.bots.store import slugify
 from glyphh_server.ops.projects.views import Member, ProjectIn, ProjectPatch, ProjectView
 
 MISSING: str = "There is no such project."
-FIELDS: frozenset[str] = frozenset(ProjectView.model_fields) - {"members"}
+FIELDS: frozenset[str] = frozenset(ProjectView.model_fields) - {"members", "github_connected"}
 CLEARED: frozenset[str] = frozenset({"runs_on", "orchestrator", "max_spend_cents"})  # null in a patch clears these
 NOT_CREW: str = "A project's orchestrator is a bot of its crew (or none: Claude)."
 
@@ -50,7 +50,8 @@ def _led(members: list[str], orchestrator: uuid.UUID | None) -> None:
 
 async def view(conn: AsyncConnection, project: Any) -> ProjectView:
     members = [Member(id=b.id, slug=b.slug, name=b.name) for b in await crew(conn, project.members)]
-    return ProjectView(**{k: getattr(project, k) for k in FIELDS}, members=members)
+    connected = project.github_installation_id is not None
+    return ProjectView(**{k: getattr(project, k) for k in FIELDS}, members=members, github_connected=connected)
 
 
 async def row(conn: AsyncConnection, slug: str) -> Any:
@@ -76,8 +77,8 @@ async def _saved(conn: AsyncConnection, statement: Any, slug: str) -> Any:
         raise Conflict(f"The org already has a project {slug!r}: name it another way.", slug=slug) from err
 
 
-async def create(conn: AsyncConnection, who: Principal, body: ProjectIn) -> ProjectView:
-    slug = slugify(body.name)
+async def create(conn: AsyncConnection, who: Principal, body: ProjectIn, slug: str = "") -> ProjectView:
+    slug = slug or slugify(body.name)
     members = await _members(conn, body.members)
     _led(members, body.orchestrator)
     values: dict[str, Any] = {
@@ -102,6 +103,8 @@ async def patch(conn: AsyncConnection, slug: str, body: ProjectPatch) -> Project
         changes["runs_on"] = await places.checked(conn, changes["runs_on"])
     if "repo_url" in changes:
         changes["repo_url"] = changes["repo_url"].rstrip("/")
+    if changes.get("repo_url", project.repo_url) != project.repo_url:
+        changes["github_installation_id"] = None  # another repo: connected again by its next run
     _led(changes.get("members", project.members), changes.get("orchestrator", project.orchestrator))
     statement = Project.__table__.update().where(Project.id == project.id).values(**changes, updated_at=func.now())
     return await view(conn, await _saved(conn, statement, slug))

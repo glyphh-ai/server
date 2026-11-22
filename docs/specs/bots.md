@@ -449,7 +449,8 @@ set), `instructions` (the brief given on the project, at most 20,000 characters)
   requests, but run no commands, tests or browser.
 
 **A run** (`ops/projects/`): `POST /v1/projects/{slug}/runs {task}` (`task` may be empty: the crew works from the
-instructions alone) is refused without the org's GitHub token (404 `github_key`), with no bot of the crew left (422
+instructions alone) is refused while GitHub is not connected for its repo (404 `github_app_missing` with
+`install_url`, 403 `github_not_linked` or `github_no_write`: GitHub, below), with no bot of the crew left (422
 `members`), while the project has a run going (409), while its rrotor is not linked (409 `rrotor_offline`), or on
 Glyphh cloud with neither the org's Anthropic key nor Glyphh's (503 `anthropic_off`). A run begins with its project's
 turn mode, review and caps. Nothing waits on the server: each step's result moves the run on (`engine.py`, `next`).
@@ -475,7 +476,7 @@ the next turn's words and not kept.
 **On Glyphh cloud** (`cloud.py`, `claude.py`, `repo.py`): no code runs in the cloud, so there is no shell, no checkout
 and no browser. A step is a task of the server's own process: the bot's Claude step (Anthropic's Messages API, on the
 org's own key or Glyphh's, let in by the meter and each request charged as a bot's agent steps are) with the repo as
-its tools, through GitHub's REST API with the org's GitHub token: `list_files {under?}`, `read_file {path}`,
+its tools, through GitHub's REST API with the step's own GitHub token: `list_files {under?}`, `read_file {path}`,
 `write_file {path, content}` and `delete_file {path}` (a file at most 400 kB, text only; at most 60 files changed a
 turn; 60 requests a step). What it wrote is held until the turn ends, then committed once on the turn's branch as
 the bot (git's data API: a tree on the base's, a commit, the branch made and moved) and opened as a pull request with
@@ -498,29 +499,81 @@ call that cannot go (the rrotor not linked, a turn too big), ends the run `faile
 and `cost_micros` (its tokens at Anthropic's rate for its bot's model: what the spend cap counts); a rrotor's turns
 run on the org's own key there and put nothing on the meter.
 
-**The org's GitHub token** (`ops/projects/github.py`, `github_keys`): a fine-grained token the person makes (the
-repos' contents and pull requests, read and write), set on the platform with `PUT /v1/github-key {token}`, tried with
-GitHub (`GET /user`: its login), kept sealed, shown by its last four characters and its login; used by the server for
-a cloud step and the review at the end, and sent with each call to a rrotor (in git's environment there, never
-kept). Not the org's GitHub connection: Pipedream runs a connection's actions but gives no token out for an account
-signed in through its own OAuth app, and git needs one. Not the Glyphh GitHub App: it is installed per person and
-mints read-only tokens.
+**GitHub** (`ops/projects/github.py`, `ops/github_app.py`, `ops/github_repos.py`): through the Glyphh GitHub App,
+never a token a person pastes, and no GitHub token is kept anywhere. (The org's pasted token, `github_keys` and
+`/v1/github-key`, is gone: `0023_projects.sql` drops the table with every token it held.)
+
+- **Connecting a repo.** A project records the installation of the App that covers its repo
+  (`projects.github_installation_id`; shown as `github_connected`). It is found when a person connects the repo, which
+  happens by itself when the crew's project is made (`PUT /v1/projects/crew`) and when a run starts: the server asks
+  GitHub, as the App, which installation covers the repo (`GET /repos/{owner}/{name}/installation`), then, with a token
+  of that installation that may only look, whether the GitHub account the person signs in with may push to it (`GET
+  /repos/{owner}/{name}/collaborators/{login}/permission`: `admin` or `write`). So nobody connects a repo they could
+  not change themselves, and it works the same for a repo of a person's own account and of a GitHub organisation.
+  Refused: 404 `github_app_missing` with `install_url` (GitHub's page that installs the App, or adds the repo to it)
+  while the App is not on the repo; 403 `github_not_linked` when the person has no GitHub sign-in; 403
+  `github_no_write` when they cannot push to it. Every run asks again which installation covers the repo, so an App
+  removed and installed again is connected again by the person who starts the next run, and one removed stops the
+  run with the install link.
+- **A turn's token.** Each step mints its own installation token (`POST /app/installations/{id}/access_tokens`): for
+  the project's one repo, one hour, with `contents: write`, `pull_requests: write` and `metadata: read` and nothing
+  else. On Glyphh cloud the server uses it for that step's GitHub API calls (and for the review at the end); on a
+  rrotor it is sent with that call alone, in git's environment there for the turn's clone and push and for its pull
+  request, never written down.
+- **The App's permissions on GitHub** (what the published App must have, all on repositories): **Contents: Read and
+  write**, **Pull requests: Read and write**, **Metadata: Read-only** (GitHub gives it to every App). No organisation
+  or account permission, no webhook events. Its setup URL is the server's `/v1/github/callback`.
+- **The picker's reads.** `GET /v1/github/repos`: the repos the person's own installation covers (the one they
+  installed on the GitHub account they sign in with, `github_installations`): `{account_login, manage_url, repos:
+  [{full_name, url, private, default_branch}]}`, the first 300 by name; no installation: empty, with no account.
+  `GET /v1/github/repos/{owner}/{repo}/branches`: `{default_branch, branches}` (the first 100), for any repo the
+  person can connect. A repo of a GitHub organisation is not in the list (an organisation's installation is not
+  recorded for a person): it is connected by typing `owner/name`.
+
+**The crew's project** (`ops/projects/crew.py`): the Bots screen never shows or names a project. `PUT
+/v1/projects/crew {repo, branch, members, runs_on?, turn_mode?, orchestrator?, review?, narrate?, max_turns?,
+max_spend_cents?}` finds the project for that workspace (a repo, `owner/name` or its address, and a branch, `main`
+unless given), or makes it, sets it to the bots and settings given (one left out is left as it is; a new project
+takes the defaults), connects GitHub for the repo, and answers the project. There is one per repo and branch for the
+org: its slug is `crew-` and twelve hex digits of the two, its name `<owner>/<name> (<branch>)`.
+
+**A run's model and effort.** `POST /v1/projects/{slug}/runs` also takes `model` (one of `GET /v1/bots/models`; none:
+each bot's own, and the bots' default for Claude as orchestrator) and `effort` (`low`, `medium` or `high`; none: the
+default), kept on the run (`project_runs.model`, `.effort`) and used for every step of it: the model on a rrotor and
+on Glyphh cloud (and for what the spend cap counts), the effort on Glyphh cloud (Anthropic's `output_config.effort`);
+a rrotor's Claude Code is not told the effort yet.
 
 | Call | What |
 |---|---|
-| `GET`/`POST /v1/projects`, `GET`/`PATCH`/`DELETE /v1/projects/{slug}` | A project: `{id, slug, name, repo_url, base_branch, members: [{id, slug, name}], instructions, instructions_path, turn_mode: wait \| orchestrator, orchestrator, review: each_turn \| end, runs_on, max_turns, max_spend_cents, narrate, created_at, updated_at}`; a slug taken is `E_CONFLICT`; an orchestrator not of the crew is 422 `orchestrator`; `PATCH` with `runs_on`, `orchestrator` or `max_spend_cents` null clears it; deleting it deletes its runs |
-| `POST /v1/projects/{slug}/runs` | `{task}` (may be empty) → 202, its run: `{id, project_slug, task, status, ended, turn_mode, review, runs_on, max_turns, max_spend_cents, work_branch, pr_url, number, error, turns: [{n, bot_id, bot_slug, bot_name, branch, status, picked_by, why, said, title, pr_url, number, head_sha, files, done, error, input_tokens, output_tokens, cost_micros, created_at, finished_at}], input_tokens, output_tokens, cost_micros, created_at, finished_at}`; a turn's `status` is `picking` (the orchestrator choosing; `bot_slug` empty), `running`, `open`, `unchanged`, `merging`, `merged`, `conflict`, `rejecting`, `rejected`, `failed` or `cancelled` |
+| `GET`/`POST /v1/projects`, `GET`/`PATCH`/`DELETE /v1/projects/{slug}` | A project: `{id, slug, name, repo_url, base_branch, members: [{id, slug, name}], instructions, instructions_path, turn_mode: wait \| orchestrator, orchestrator, review: each_turn \| end, runs_on, max_turns, max_spend_cents, narrate, github_connected, created_at, updated_at}`; a slug taken is `E_CONFLICT`; an orchestrator not of the crew is 422 `orchestrator`; `PATCH` with `runs_on`, `orchestrator` or `max_spend_cents` null clears it; deleting it deletes its runs |
+| `POST /v1/projects/{slug}/runs` | `{task, model?, effort?}` (`task` may be empty) → 202, its run: `{id, project_slug, task, status, ended, turn_mode, review, runs_on, max_turns, max_spend_cents, model, effort, work_branch, pr_url, number, error, turns: [{n, bot_id, bot_slug, bot_name, branch, status, picked_by, why, said, title, pr_url, number, head_sha, files, done, error, input_tokens, output_tokens, cost_micros, created_at, finished_at}], input_tokens, output_tokens, cost_micros, created_at, finished_at}`; a turn's `status` is `picking` (the orchestrator choosing; `bot_slug` empty), `running`, `open`, `unchanged`, `merging`, `merged`, `conflict`, `rejecting`, `rejected`, `failed` or `cancelled` |
 | `GET /v1/projects/{slug}/runs`, `GET /v1/project-runs/{id}` | Its runs, the newest first (the last 50); one run |
 | `POST /v1/project-runs/{id}/answer` | `{answer: merge \| reject}` → 202: the turn's pull request that waits, or with review `end` the whole run's; a run not waiting is `E_CONFLICT` |
 | `POST /v1/project-runs/{id}/cancel` | The run ended, its step out stopped; one ended already is `E_CONFLICT` |
-| `GET`/`PUT`/`DELETE /v1/github-key` | `{set, hint, login, set_at}`; `PUT` takes `{token}`, one GitHub does not take is 422 `token` |
+| `PUT /v1/projects/crew` | The crew's project for a workspace, found or made and set: `{repo, branch, members, …settings}` → the project |
+| `GET /v1/github/repos`, `GET /v1/github/repos/{owner}/{repo}/branches` | The repo picker's reads (above); `POST /v1/github/install` and `GET /v1/github/installations` are the App's install link and the person's installation |
 
 The connector's tools: `projects`, `project`, `project_create`, `project_update`, `project_delete`, `project_run`,
 `project_runs`, `project_run_get`, `project_run_answer`, `project_run_cancel` (offered with or without rrotor: a
-project runs on Glyphh cloud too); a project's pull request also shows in `bot_approvals`. The GitHub token is set on
-the platform only, never through the chat.
+project runs on Glyphh cloud too); a project's pull request also shows in `bot_approvals`. The GitHub App is
+installed in the browser, never through the chat: a run says so, with the link, when it is not on the repo.
 
 **The old names.** Every route also answers at its swarm path (`/v1/swarms…`, `/v1/swarm-runs…`), out of the spec:
 the same answers in the project's shape (the list under both `projects` and `swarms`), a body's `rounds` left out and
 its review `auto` read as `end`. Each tool is still called by its swarm name (`swarms`, `swarm`, `swarm_create`, …),
 never listed. The tables were renamed with their rows (`0023_projects.sql`).
+
+## 11. Recents (built)
+
+The Bots screen has one list of past runs, a bot's own and a crew's alike, and no approvals page: `GET /v1/recents`
+(`ops/bots/recents.py`) reads the org's `bot_runs` and `project_runs` together, the newest first.
+
+| Call | What |
+|---|---|
+| `GET /v1/recents?q=&waiting=&archived=&pinned=&cursor=&limit=` | `{recents: [{id, kind: bot \| crew, title, bot_slug, bot_name, project_slug, workspace, branch, runs_on, status, waiting, pinned, archived, created_at}], next_cursor, needs_you, archived_count}`. `title` is the task's first line (empty when it had none); a crew's run has `bot_name` `Crew`, its `project_slug` and its `workspace` (`owner/name`) and `branch`; `waiting` is `status` `needs_input`. `q` is found in the task, a bot's name or the workspace; `waiting` and `pinned` keep only those; archived runs are left out unless `archived` is given, which lists only them; `limit` 1 to 100 (30), `cursor` the last page's `next_cursor` |
+| `POST /v1/recents/{id}/pin` \| `unpin` \| `archive` \| `unarchive` | The person's own mark on a run → the recent; no such run is 404 |
+| `DELETE /v1/recents/{id}` | The run deleted for the whole org, with its turns and everyone's marks on it (pull requests stay on GitHub) → 204; 409 `run_live` while it is queued, running or waiting: cancel it first |
+
+`needs_you` is the org's runs waiting on a person now, whatever the filters: the bots' questions and approvals and
+the crews' pull requests (what each asks is still `GET /v1/bot-approvals`). Pinned and archived are each person's own
+(`run_marks`: `user_id`, `run_id`, `pinned`, `archived`); `archived_count` is the person's.

@@ -1,25 +1,27 @@
-"""Projects under test: a crew of two bots and the org's GitHub token saved; GitHub's API for one repo faked in memory
-(FakeRepo, in place of ops/projects/repo.py's Repo), and Claude with tools faked by a script of replies (FakeClaude,
-in place of ops/projects/claude.py's Claude)."""
+"""Projects under test: a crew of two bots, made by a person who signs in with GitHub and may push to the project's
+repo, where Glyphh's GitHub App is installed (FakeGitHub, at the HTTP layer: tests/projects/github.py); the repo's
+files and pull requests faked in memory (FakeRepo, in place of ops/projects/repo.py's Repo), and Claude with tools
+faked by a script of replies (FakeClaude, in place of ops/projects/claude.py's Claude)."""
 
 import uuid
 from types import SimpleNamespace
 from typing import Any
 
 import httpx
-from sqlalchemy import update
+from sqlalchemy import insert, update
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from glyphh_server.errors import Invalid, Unavailable
-from glyphh_server.models import Bot
+from glyphh_server.errors import Unavailable
+from glyphh_server.models import Bot, Identity
 from tests.bots.conftest import Served, made_bot
 from tests.bots.remote import OnRrotor, online
 from tests.db.helpers import Person, person
 from tests.link import Rt
+from tests.projects.github import FakeGitHub
 
 FINE: dict[str, Any] = {"loop": [{"id": "a", "agent": "Hi"}]}
 REPO: str = "https://github.com/acme/site"
-TOKEN: str = "github_pat_" + "x" * 30
+INSTALLATION: int = 7001
 
 
 class FakeRepo:
@@ -106,8 +108,11 @@ class FakeClaude:
     def then(self, *replies: Any) -> None:
         self.script += [r if isinstance(r, list | Exception) else [r] for r in replies]
 
-    async def create(self, system: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> Any:
-        self.asked.append({"system": system, "messages": list(messages), "tools": [t["name"] for t in tools]})
+    async def create(
+        self, system: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]], effort: str | None = None
+    ) -> Any:
+        asked = {"system": system, "messages": list(messages), "tools": [t["name"] for t in tools], "effort": effort}
+        self.asked.append(asked)
         reply = self.script.pop(0)
         if isinstance(reply, Exception):
             raise reply
@@ -123,31 +128,49 @@ class FakeClaude:
 
 
 def faked(s: Served) -> tuple[FakeRepo, FakeClaude]:
-    """The projects service's GitHub and Claude, faked; and a token tried by a fake GitHub."""
+    """The projects service's GitHub (the App's API at the HTTP layer; the repo's files in memory) and Claude, faked.
+    The repo is handed each token as it is minted: `repo.tokens`."""
     projects = s.app.state.bots.projects
     repo, claude = FakeRepo(), FakeClaude()
+    repo.tokens = []
 
-    async def check(token: str) -> str:
-        if token.endswith("bad"):
-            raise Invalid("GitHub does not take that token.", reason="token")
-        return "acme-bot"
+    def repo_for(token: str, name: str) -> FakeRepo:
+        repo.tokens.append(token)
+        return repo
 
     def claude_for(key: str, model: str) -> FakeClaude:
         claude.keys.append((key, model))
         return claude
 
-    projects.check_github, projects.repo_for, projects.claude_for = check, lambda token, name: repo, claude_for
+    projects.gh = FakeGitHub()
+    projects.github.http = projects.gh.http()
+    projects.repo_for, projects.claude_for = repo_for, claude_for
     return repo, claude
 
 
+def github_of(s: Served) -> FakeGitHub:
+    found: FakeGitHub = s.app.state.bots.projects.gh
+    return found
+
+
+async def signs_in_with_github(engine: AsyncEngine, who: Person, login: str) -> tuple[str, str]:
+    """The person signs in with a GitHub account: its id and login."""
+    account = str(uuid.uuid4().int % 10**9)
+    async with engine.begin() as conn:
+        values = {"user_id": who.user_id, "provider": "github", "provider_user_id": account}
+        await conn.execute(insert(Identity).values(values))
+    return account, login
+
+
 async def crew(s: Served, engine: AsyncEngine, key: bool = True) -> tuple[Person, list[dict[str, Any]]]:
+    """Ada and her two bots; `key`: she signs in with GitHub, and Glyphh's App is installed on acme/site, where she
+    may push."""
     ada = await person(engine)
     bots = [await made_bot(s, ada, name=n, spec=FINE, summary=f"{n} work") for n in ("Ada Cat", "Bo Cat")]
     async with engine.begin() as conn:
         await conn.execute(update(Bot).where(Bot.slug == "ada-cat").values(look={"head": "Round", "eye": "Wide"}))
     if key:
-        res = await s.http.put("/v1/github-key", json={"token": TOKEN}, headers=ada.headers)
-        assert res.status_code == 200 and res.json()["login"] == "acme-bot" and res.json()["hint"] == "xxxx"
+        github_of(s).install("acme/site", INSTALLATION, await signs_in_with_github(engine, ada, "ada-gh"))
     return ada, bots
 
 

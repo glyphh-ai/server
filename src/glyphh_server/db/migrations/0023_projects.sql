@@ -26,6 +26,11 @@ ALTER TABLE IF EXISTS projects ADD COLUMN IF NOT EXISTS max_turns INTEGER DEFAUL
 ALTER TABLE IF EXISTS projects ADD COLUMN IF NOT EXISTS max_spend_cents INTEGER;
 ALTER TABLE IF EXISTS projects ADD COLUMN IF NOT EXISTS narrate BOOLEAN DEFAULT false NOT NULL;
 ALTER TABLE IF EXISTS projects ADD CONSTRAINT projects_turn_mode CHECK (turn_mode IN ('wait', 'orchestrator'));
+-- GitHub is reached through the Glyphh GitHub App: a project keeps the installation that covers its repo, and the
+-- org's pasted GitHub token is gone, with every token it held (a project made before connects again, with one click,
+-- when a person next runs it).
+ALTER TABLE IF EXISTS projects ADD COLUMN IF NOT EXISTS github_installation_id BIGINT;
+DROP TABLE IF EXISTS github_keys;
 
 ALTER TABLE IF EXISTS swarm_runs RENAME TO project_runs;
 ALTER TABLE IF EXISTS project_runs RENAME COLUMN swarm_id TO project_id;
@@ -47,6 +52,8 @@ ALTER TABLE IF EXISTS project_runs ADD COLUMN IF NOT EXISTS pr_url TEXT;
 ALTER TABLE IF EXISTS project_runs ADD COLUMN IF NOT EXISTS number INTEGER;
 ALTER TABLE IF EXISTS project_runs ADD COLUMN IF NOT EXISTS on_cloud BOOLEAN DEFAULT false NOT NULL;
 ALTER TABLE IF EXISTS project_runs ADD COLUMN IF NOT EXISTS machine TEXT;
+ALTER TABLE IF EXISTS project_runs ADD COLUMN IF NOT EXISTS model TEXT;
+ALTER TABLE IF EXISTS project_runs ADD COLUMN IF NOT EXISTS effort TEXT;
 
 DO $$
 BEGIN

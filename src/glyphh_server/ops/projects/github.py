@@ -1,79 +1,81 @@
-"""The org's GitHub token for its projects (docs/specs/bots.md, 10): a project's turns read its repo, push each turn's
-branch and open, merge or close its pull request with it: on Glyphh cloud through GitHub's API (ops/projects/repo.py),
-on a rrotor with git (sent with each call, in git's environment there, never kept). The org saves it here, sealed
-(ops/auth/sealed.py), as it saves its Anthropic key: a GitHub token
-the person makes (a fine-grained one: the repos, contents and pull requests, read and write), tried with GitHub
-before it is kept and shown only by its last four characters and the account it is.
+"""GitHub for the org's projects, through the Glyphh GitHub App (docs/specs/bots.md, 10): never a token a person
+pastes, and none kept. A project records the installation that covers its repo, found when a person connects it (the
+crew's project made, or a run started): GitHub must say the App is installed on that repo (else not found, with the
+link that installs it) and that the person, by the GitHub account they sign in with, may push to it. Each turn then
+gets its own token, minted from that installation for that one repo, for one hour, with contents and pull requests
+write and metadata read: on Glyphh cloud for GitHub's API (ops/projects/repo.py), on a rrotor sent with the call for
+that turn's clone and push. And the reads for a repo picker: the repos the person's own installation covers, and a
+repo's branches."""
 
-Why not the org's GitHub connection (Pipedream): Pipedream runs a connection's actions and proxies its requests, but
-gives no token out for an account signed in with its own OAuth app, and git on the rrotor needs one. Why not the
-Glyphh GitHub App: it is installed per person, and mints read-only tokens."""
-
-from collections.abc import Awaitable, Callable
+import re
+import uuid
 from typing import Any
 
 import httpx
-from sqlalchemy import delete, func, select
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from glyphh_server.errors import Invalid, NotFound
-from glyphh_server.models import GitHubKey
-from glyphh_server.ops.auth.principal import Principal
-from glyphh_server.ops.auth.sealed import seal, unseal
-from glyphh_server.ops.projects.views import GitHubKeyView
+from glyphh_server.config import Settings
+from glyphh_server.errors import Forbidden, Invalid, NotFound
+from glyphh_server.models import GitHubInstallation
+from glyphh_server.ops import github_repos
+from glyphh_server.ops.github_app import LOOK, TURN, GitHubApp
+from glyphh_server.ops.github_installations import github_account
+from glyphh_server.ops.github_repos import Branches, Repos
 
-USER: str = "https://api.github.com/user"
-NO_KEY: str = (
-    "Save the org's GitHub token first (PUT /v1/github-key): a project's turns push and open pull requests with it."
-)
-Check = Callable[[str], Awaitable[str]]  # a token tried with GitHub: the account's login, or Invalid
+NO_PUSH: str = "You can't push to {repo} on GitHub, so you can't connect it here."
+MANAGE: str = "https://github.com/settings/installations/{id}"
+_NAME: str = r"(?!\.+(/|$))[A-Za-z0-9_.-]{1,100}"  # an owner or a repo: never `.` or `..`, which a URL would follow
+REPO: re.Pattern[str] = re.compile(f"{_NAME}/{_NAME}")
 
 
-def checker(http: httpx.AsyncClient) -> Check:
-    async def check(token: str) -> str:
-        headers = {"authorization": f"Bearer {token}", "accept": "application/vnd.github+json"}
+class GitHub:
+    def __init__(self, http: httpx.AsyncClient, settings: Settings, key: Any) -> None:
+        self.http, self.settings, self.key = http, settings, key
+
+    def app(self) -> GitHubApp:
+        return GitHubApp(self.http, self.settings, self.key)
+
+    async def _token(self, app: GitHubApp, installation_id: int, repo: str | None, permissions: dict[str, str]) -> str:
+        name = repo.split("/")[1] if repo else None
         try:
-            res = await http.get(USER, headers=headers)
-        except httpx.HTTPError as err:
-            raise Invalid("GitHub did not answer: try again.", reason="token") from err
-        if res.status_code != 200:
-            raise Invalid("GitHub does not take that token.", reason="token")
-        return str(res.json().get("login") or "")
+            return str((await app.repo_token(installation_id, name, permissions))["token"])
+        except NotFound as err:
+            raise app.missing(repo or "your GitHub account") from err
 
-    return check
+    async def connect(self, conn: AsyncConnection, user_id: uuid.UUID, repo: str) -> int:
+        """The installation that covers the repo (`owner/name`), once GitHub says this person may push to it."""
+        if not REPO.fullmatch(repo):
+            raise Invalid("A GitHub repo is owner/name.", reason="repo", repo=repo)
+        account = await github_account(conn, user_id)
+        app = self.app()
+        installation_id = await app.covering(repo)
+        token = await self._token(app, installation_id, repo, LOOK)
+        if not await github_repos.may_push(self.http, token, repo, await app.login(account), account):
+            raise Forbidden(NO_PUSH.format(repo=repo), reason="github_no_write", repo=repo)
+        return installation_id
 
+    async def token(self, installation_id: int | None, repo: str) -> str:
+        """A turn's token: that one repo, one hour, contents and pull requests write."""
+        app = self.app()
+        if installation_id is None:
+            raise app.missing(repo)
+        return await self._token(app, installation_id, repo, TURN)
 
-def view(row: Any) -> GitHubKeyView:
-    if row is None:
-        return GitHubKeyView(set=False, hint="", login="", set_at=None)
-    return GitHubKeyView(set=True, hint=row.hint, login=row.login, set_at=row.set_at)
+    async def branches(self, conn: AsyncConnection, user_id: uuid.UUID, repo: str) -> Branches:
+        installation_id = await self.connect(conn, user_id, repo)
+        token = await self._token(self.app(), installation_id, repo, LOOK)
+        return await github_repos.branches(self.http, token, repo)
 
-
-async def get(conn: AsyncConnection) -> Any:
-    return (await conn.execute(select(GitHubKey))).first()
-
-
-async def token(conn: AsyncConnection, secret: str) -> str:
-    """The org's token, opened; NotFound says to save one."""
-    found = await get(conn)
-    if found is None:
-        raise NotFound(NO_KEY, reason="github_key")
-    return unseal(secret, found.token)
-
-
-async def put(conn: AsyncConnection, who: Principal, secret: str, given: str, check: Check) -> GitHubKeyView:
-    given = given.strip()
-    login = await check(given)
-    values = {"org_id": who.org_id, "token": seal(secret, given), "hint": given[-4:], "login": login}
-    values["set_by"] = who.user_id
-    kept = insert(GitHubKey).values(**values)
-    await conn.execute(
-        kept.on_conflict_do_update(index_elements=[GitHubKey.org_id], set_={**values, "set_at": func.now()})
-    )
-    return view(await get(conn))
-
-
-async def remove(conn: AsyncConnection, org_id: Any) -> GitHubKeyView:
-    await conn.execute(delete(GitHubKey).where(GitHubKey.org_id == org_id))
-    return view(None)
+    async def repos(self, conn: AsyncConnection, user_id: uuid.UUID) -> Repos:
+        """The repos the person's own installation covers; none listed when they have not installed the App."""
+        mine = (GitHubInstallation.user_id == user_id, GitHubInstallation.removed_at.is_(None))
+        found = (await conn.execute(select(GitHubInstallation).where(*mine))).first()
+        if found is None:
+            return Repos(account_login="", manage_url="", repos=[])
+        token = await self._token(self.app(), found.installation_id, None, LOOK)
+        return Repos(
+            account_login=found.account_login,
+            manage_url=MANAGE.format(id=found.installation_id),
+            repos=await github_repos.repos(self.http, token),
+        )
