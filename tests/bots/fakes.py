@@ -130,6 +130,11 @@ class FakeModel:
         self.ada.cases[self.name].append((data, outcome))
         return SimpleNamespace(data={"id": f"p{len(self.ada.cases[self.name])}"})
 
+    def record_many(self, cases: list[dict[str, Any]]) -> dict[str, Any]:
+        for c in cases:
+            self.record(c["data"], c.get("outcome"))
+        return {"added": len(cases), "precedents": len(self.ada.cases[self.name])}
+
     def decide(self, data: dict[str, Any]) -> Decision:
         self._there()
         if self.name in self.ada.rule:
