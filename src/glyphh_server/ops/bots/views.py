@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from glyphh_server.ops.bots.exposed import ABOUT as TOOLS_ABOUT
 from glyphh_server.ops.bots.exposed import ConnectorTool
 from glyphh_server.ops.bots.schedule import Schedule
+from glyphh_server.ops.bots.shown import Shown
 
 LOOK_PARTS: tuple[str, ...] = ("head", "tail", "eye", "extra", "accessory", "pose")
 
@@ -137,7 +138,7 @@ class Question(BaseModel):
     approval: bool = Field(False, description="An approval: the person's yes (or no) before the step acts")
 
 
-class RunView(BaseModel):
+class RunView(Shown):
     id: uuid.UUID
     bot_slug: str
     status: str = Field(

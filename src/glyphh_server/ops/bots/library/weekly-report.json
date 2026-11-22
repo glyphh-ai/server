@@ -10,6 +10,8 @@
     "report": "---\nname: report\ndescription: How the weekly report is written\n---\n\nThree sections: Shipped (the five most important changes, one line each, customer words first), Fixed (a count and the two that mattered most), Next (what the open work points to). Under 300 words. Its title is Week of <Monday's date>.\n"
   },
   "spec": {
+    "takes": "a GitHub search for the week's merged pull requests",
+    "try": "is:pr is:merged merged:>=2026-11-16 org:acme",
     "touches": "drafts",
     "seed": {"personality": ["Clear and confident, never hype."]},
     "gates": {
