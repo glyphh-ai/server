@@ -19,7 +19,7 @@ from glyphh_server.errors import Unavailable
 from glyphh_server.llm import meter
 from glyphh_server.models import Bot
 from glyphh_server.ops.auth.sealed import unseal
-from glyphh_server.ops.bots import cloud, engine, keys, prices
+from glyphh_server.ops.bots import cloud, decided, engine, keys, prices
 from glyphh_server.ops.bots.pipedream import Pipedream
 
 NO_KEY: str = "Add your Anthropic API key in the bots' settings: its agent steps run on it."
@@ -84,4 +84,5 @@ class Goes:
         async with self.engine.begin() as conn:
             await tenancy.enter(conn, bot.org_id)
             await conn.execute(update(Bot).where(Bot.id == bot.id).values(state=left.state))
+            await decided.sync(conn, bot, left.state)
         return left
