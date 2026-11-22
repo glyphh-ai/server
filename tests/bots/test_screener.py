@@ -54,12 +54,13 @@ def inbox(s: Served) -> None:
 
 
 def rules(s: Served) -> dict[str, str]:
-    """Ada's calls, faked: bulk mail is spam; a python resume is a sure pursue, any other one unsure; stock phrases
-    mean mostly generated."""
+    """Ada's calls, faked: bulk mail is spam; a python resume is a sure strong fit, any other one an unsure poor one;
+    many stock phrases mean mostly generated, a few some; an application with none has no close generated precedent."""
     names = dict(zip(GATES, package.gate_models(SLUG, {"gates": dict.fromkeys(GATES)}), strict=False))
     s.ada.rule[names["source"]] = lambda c: ("spam" if c["e"]["s"]["bulk"] == "yes" else "real", 0.95)
-    s.ada.rule[names["fit"]] = lambda c: ("pursue", 0.95) if "python" in c["a"]["s"]["skills"] else ("pass", 0.55)
-    s.ada.rule[names["made"]] = lambda c: ("mostly" if c["g"]["s"]["stock"] >= 20 else "none", 0.9)
+    s.ada.rule[names["fit"]] = lambda c: ("strong", 0.95) if "python" in c["a"]["s"]["skills"] else ("poor", 0.55)
+    s.ada.rule[names["made"]] = lambda c: ("mostly" if c["g"]["s"]["stock"] >= 20 else "some", 0.9)
+    s.ada.near[names["made"]] = lambda c: 0.9 if c["g"]["s"]["stock"] > 0 else 0.2
     return names
 
 
@@ -82,32 +83,33 @@ async def test_a_person_installs_runs_reads_corrects_and_screens_again(screening
     assert (bot["slug"], bot["schedule_summary"], bot["connections"][0]["tools"]) == (SLUG, "Every hour", [])
     names, _ = rules(s), inbox(s)
     run = await started(s, ada, given="", slug=SLUG)
-    assert [len(s.ada.cases[names[g]]) for g in GATES] == [196, 176, 176]  # the seed set
+    assert [len(s.ada.cases[names[g]]) for g in GATES] == [156, 140, 80]  # the seed set's train split
     assert run["status"] == "needs_input", (run["error"], run["log"])
     assert [b["label"] for b in run["question"]["batch"]] == ["Lee Novak - product designer"]
-    run = await answered(s, ada, run, f"{run['question']['batch'][0]['n']}=pass")
+    run = await answered(s, ada, run, f"{run['question']['batch'][0]['n']}=borderline")
     assert run["status"] == "done", run["error"]
     got = verdicts(run)
     assert set(got) == {"m-jane", "m-lee", "m-agency"}
     jane, lee = got["m-jane"], got["m-lee"]
-    assert (jane["verdict"], jane["pursue"], jane["generated"]["outcome"]) == (
-        "pursue", {"outcome": "pursue", "confidence": 0.95, "by": "ada"}, "none")  # fmt: skip
+    assert (jane["verdict"], jane["fit"], jane["generated"]) == (
+        "strong", {"outcome": "strong", "confidence": 0.95, "by": "ada"},
+        {"outcome": "human", "confidence": None, "by": "probe", "nearest": 0.2, "reference": 0.9})  # fmt: skip
     assert (jane["years"], jane["email"], "kubernetes" in jane["skills"]) == (11, "jane.okafor@fastmail.com", True)
-    assert (lee["verdict"], lee["pursue"]["by"], lee["generated"]["outcome"]) == ("pass", "person", "mostly")
-    assert got["m-agency"]["verdict"] == "spam"
+    assert (lee["verdict"], lee["fit"]["by"], lee["generated"]["outcome"]) == ("borderline", "person", "mostly")
+    assert got["m-agency"]["verdict"] == "spam" and run["data"]["probe"]["reference"]["n"] == 22
     assert [r["id"] for r in run["data"]["verdicts"]["rejected"]] == ["m-fake"]
-    assert run["data"]["verdicts"]["summary"] == "1 pursue, 1 pass, 1 spam; 1 refused by the sender checks"
+    assert run["data"]["verdicts"]["summary"] == "1 strong, 1 borderline, 1 spam; 1 refused by the sender checks"
     assert s.pd.marked == {  # type: ignore[attr-defined]
-        "m-jane": {"Screened", "Screened/Pursue"}, "m-lee": {"Screened", "Screened/Pass"},
+        "m-jane": {"Screened", "Screened/Strong"}, "m-lee": {"Screened", "Screened/Borderline"},
         "m-agency": {"Screened", "Screened/Spam"}, "m-fake": {"Screened", "Screened/Spam"},
     }  # fmt: skip
-    said = {"outcome": "pass", "gate": "fit", "item": "m-jane"}
+    said = {"outcome": "poor", "gate": "fit", "item": "m-jane"}
     fixed = await s.http.post(f"/v1/bot-runs/{run['id']}/wrong", json=said, headers=ada.headers)
-    assert (fixed.status_code, fixed.json()["said"], fixed.json()["now"]) == (200, "pursue", "pass"), fixed.text
-    assert s.ada.cases[names["fit"]][-1][1] == "pass" and s.ada.cases[names["fit"]][-1][0]["a"]["s"]["id"] == "m-jane"
+    assert (fixed.status_code, fixed.json()["said"], fixed.json()["now"]) == (200, "strong", "poor"), fixed.text
+    assert s.ada.cases[names["fit"]][-1][1] == "poor" and s.ada.cases[names["fit"]][-1][0]["a"]["s"]["id"] == "m-jane"
     again = await started(s, ada, given="", slug=SLUG)
     assert (again["status"], again["data"]["verdicts"]["summary"]) == ("done", "no new applications")
-    assert len(s.ada.cases[names["fit"]]) == 178  # seeded once: the seed set is not recorded again
+    assert len(s.ada.cases[names["fit"]]) == 142  # seeded once: the seed set is not recorded again
 
 
 async def test_a_resume_handed_in_is_screened_without_the_inbox(screening: Served, engine: AsyncEngine) -> None:
@@ -118,7 +120,7 @@ async def test_a_resume_handed_in_is_screened_without_the_inbox(screening: Serve
     run = await started(s, ada, given=json.dumps(handed), slug=SLUG)
     assert run["status"] == "done", (run["error"], run["log"])
     (one,) = run["data"]["verdicts"]["verdicts"]
-    assert (one["id"].startswith("given-"), one["verdict"], one["role"]) == (True, "pursue", "senior backend engineer")
+    assert (one["id"].startswith("given-"), one["verdict"], one["role"]) == (True, "strong", "senior backend engineer")
     assert run["data"]["label"] == {"labelled": {}}
     assert not [u for _, u, _ in s.pd.proxied if "/messages" in u]  # type: ignore[attr-defined]
 
@@ -135,20 +137,17 @@ async def test_the_screener_in_the_persons_glyphh_connection(screening: Served, 
     asked = (await tool(s.http, auth, "screen_inbox"))["structuredContent"]
     assert asked["status"] == "needs_input" and asked["question"]["batch"][0]["label"] == "Lee Novak - product designer"
     n = asked["question"]["batch"][0]["n"]
-    said = await tool(s.http, auth, "screener_answer", run_id=asked["run_id"], answer=f"{n}=pass")
+    said = await tool(s.http, auth, "screener_answer", run_id=asked["run_id"], answer=f"{n}=poor")
     assert said["isError"] is False, said
     await s.settled()
     (latest,) = (await tool(s.http, auth, "applicants"))["structuredContent"]["runs"]
-    assert latest["status"] == "done" and latest["verdicts"]["summary"].startswith("1 pursue, 1 pass, 1 spam")
+    assert latest["status"] == "done" and latest["verdicts"]["summary"].startswith("1 strong, 1 poor, 1 spam")
     shown = {v["id"]: (v["verdict"], (v["generated"] or {}).get("outcome")) for v in latest["verdicts"]["verdicts"]}
-    assert shown == {"m-jane": ("pursue", "none"), "m-lee": ("pass", "mostly"), "m-agency": ("spam", None)}
-    fixed = await tool(s.http, auth, "correct_generated", run_id=asked["run_id"], outcome="some", item="m-jane")
-    assert fixed["content"][0]["text"] == "Gate made said none; it learned some.", fixed
-    assert s.ada.cases[names["made"]][-1][1] == "some"
+    assert shown == {"m-jane": ("strong", "human"), "m-lee": ("poor", "mostly"), "m-agency": ("spam", None)}
+    fixed = await tool(s.http, auth, "correct_generated", run_id=asked["run_id"], outcome="fully", item="m-lee")
+    assert fixed["content"][0]["text"] == "Gate made said mostly; it learned fully.", fixed
+    assert s.ada.cases[names["made"]][-1][1] == "fully"
     pasted = await tool(s.http, auth, "screen_application", resume="\n".join(JANE), role="Senior Backend Engineer")
     (one,) = pasted["structuredContent"]["verdicts"]["verdicts"]
-    assert (pasted["structuredContent"]["status"], one["verdict"], one["pursue"]["confidence"]) == (
-        "done",
-        "pursue",
-        0.95,
-    )
+    got = (pasted["structuredContent"]["status"], one["verdict"], one["fit"]["confidence"], one["generated"]["by"])
+    assert got == ("done", "strong", 0.95, "probe")

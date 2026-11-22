@@ -1,9 +1,11 @@
 """The Resume Screener's parts one at a time: Gmail read through the proxy (text or HTML, attachments inline or
 fetched, the kinds and sizes left out, labels kept), resumes read and their fields, the signals, the sender checks,
-what the person hands in, the verdicts put together, a seed set named that Glyphh does not ship, and a built-in tool
-called by a bot on a rrotor."""
+what the person hands in, the probe with no reference or no precedent, the verdicts put together, a seed set named
+that Glyphh does not ship, and built-in tools called by a bot on a rrotor."""
 
+import json
 import uuid
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -11,7 +13,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from glyphh_server.errors import Invalid
-from glyphh_server.ops.bots import applicants, builtins, gmail, resumes, seeds, signals, verdicts
+from glyphh_server.ops.bots import applicants, builtins, gmail, probe, resumes, seeds, signals, verdicts
 from glyphh_server.ops.bots.pipedream import Pipedream
 from tests.bots.conftest import BOTS
 from tests.bots.mailbox import FakeGmail, b64, docx, message, pdf
@@ -106,8 +108,8 @@ async def test_the_inbox_tools_without_gmail_say_so() -> None:
     with pytest.raises(ValueError, match="no Gmail connection"):
         await tools["inbox_applications"]({"most": 500})
     with pytest.raises(ValueError, match="no Gmail connection"):
-        await tools["inbox_label"]({"verdicts": [{"id": "m1", "verdict": "pass"}]})
-    handed_only = {"verdicts": [{"id": "given-1", "verdict": "pass"}], "rejected": [{"id": "given-2"}]}
+        await tools["inbox_label"]({"verdicts": [{"id": "m1", "verdict": "poor"}]})
+    handed_only = {"verdicts": [{"id": "given-1", "verdict": "poor"}], "rejected": [{"id": "given-2"}]}
     assert await tools["inbox_label"](handed_only) == {"labelled": {}}
     handed = await tools["inbox_applications"]({"given": {"letter": "I'd like the job."}})
     assert (handed["applications"][0]["has_resume"], handed["polled"]) == ("no", 0)
@@ -129,7 +131,22 @@ def test_a_seed_set_glyphh_does_not_ship_is_refused() -> None:
         seeds.named({"gates": {"g": {"seed_from": "nope"}, "h": {"seed_from": "resume-screener"}}})
 
 
+def test_the_probe_unseeded_sends_all_on_and_one_with_no_precedent_is_human() -> None:
+    held: dict[str, str] = {}
+    model = SimpleNamespace(decide=lambda case: SimpleNamespace(receipts=[{"sim": "x"}]))
+    bot = SimpleNamespace(gates={"made": {"case": {"x": "$item.id"}}}, gate_model=lambda name: "m")
+    ctx = SimpleNamespace(bot=bot, state=held.get, ada=SimpleNamespace(model=lambda name: model))
+    apps = {"applications": [{"id": "a"}, "junk"], "gate": "made"}
+    assert probe.probed(ctx, apps) == {"generated": [{"id": "a"}], "human": [], "reference": None}
+    assert probe.probed(ctx, "junk") == {"generated": [], "human": [], "reference": None}
+    held[probe.KEY + "made"] = json.dumps({"p5": 0.5, "n": 3})
+    assert probe.probed(ctx, apps)["human"] == [{"id": "a", "nearest": None}]
+    assert probe.spread([]) == {"n": 0} and probe.spread([0.2, 0.9])["p5"] == 0.2
+
+
 async def test_a_bot_on_a_rrotor_calls_a_built_in_tool(on_rrotor: OnRrotor, engine: AsyncEngine) -> None:
     _, _, run_id, token = await _out(on_rrotor, engine)
     status, got = await _call(on_rrotor, run_id, token, "screen_verdicts", {"applications": []})
     assert (status, got["result"]["summary"]) == (200, "no new applications")
+    status, got = await _call(on_rrotor, run_id, token, "probe_generated", {"applications": [{"id": "a"}]})
+    assert (status, got["result"]["generated"], got["result"]["reference"]) == (200, [{"id": "a"}], None)

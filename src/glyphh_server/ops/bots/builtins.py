@@ -5,7 +5,10 @@ endpoint, ops/bots/tool_calls.py), so a cloud bot still runs no code of its own.
 - `inbox_applications` `{given?, q?, most?}`: the person's own application when `given` holds one (a resume's text,
   or `{resume, letter?, sender?, role?}`), else the new applications in the bot's Gmail (`q`, a Gmail search; at most
   `most`), each read whole and made into an applicant (ops/bots/applicants.py); `{applications, rejected, polled}`.
-- `screen_verdicts` `{applications, rejected, source, fit, made}`: the gates' calls put together (ops/bots/verdicts.py).
+- `probe_generated` `{applications, gate}`: the gate probed for each application (ops/bots/probe.py), on the runner's
+  thread with the bot's own Ada; `{generated, human, reference}`. On a rrotor (no seeded reference there) all go on.
+- `screen_verdicts` `{applications, rejected, source, fit, probe, made}`: the gates' calls put together
+  (ops/bots/verdicts.py).
 - `inbox_label` `{verdicts, rejected}`: each screened message labelled in Gmail with its verdict."""
 
 import asyncio
@@ -16,12 +19,13 @@ import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from glyphh_server.ops.bots import applicants, verdicts
+from glyphh_server.ops.bots import applicants, probe, verdicts
 from glyphh_server.ops.bots.gmail import Gmail
 from glyphh_server.ops.bots.pipedream import Pipedream
 
 Call = Callable[[dict[str, Any]], Awaitable[Any]]
-NAMES: tuple[str, ...] = ("inbox_applications", "screen_verdicts", "inbox_label")
+NAMES: tuple[str, ...] = ("inbox_applications", "probe_generated", "screen_verdicts", "inbox_label")
+ON_RUNNER: dict[str, Callable[[Any, Any], Any]] = {"probe_generated": probe.probed}
 QUERY: str = "in:inbox -label:screened newer_than:14d"
 MOST: int = 25
 NO_GMAIL: str = "The bot has no Gmail connection to read: connect Gmail and give the bot its connection."
@@ -81,7 +85,12 @@ async def _merged(given: dict[str, Any]) -> Any:
     return verdicts.merged(given)
 
 
+async def _unprobed(given: dict[str, Any]) -> Any:
+    return probe.unprobed(given)
+
+
 def made(pd: Pipedream, org_id: uuid.UUID, gmail_account: str | None) -> dict[str, Call]:
     """The built-in tools for one bot's go: its Gmail the first Gmail connection in its scope (None: it has none)."""
     gmail = Gmail(pd, org_id, gmail_account) if gmail_account else None
-    return {"inbox_applications": _inbox(gmail), "screen_verdicts": _merged, "inbox_label": _label(gmail)}
+    return {"inbox_applications": _inbox(gmail), "probe_generated": _unprobed, "screen_verdicts": _merged,
+            "inbox_label": _label(gmail)}  # fmt: skip

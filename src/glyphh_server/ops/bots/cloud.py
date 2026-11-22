@@ -100,6 +100,8 @@ class Program:
         def tool(ctx: Any, given: Any) -> Any:
             if self._loop is None:
                 raise RuntimeError("the bot is only being checked")
+            if name in builtins.ON_RUNNER:  # a built-in that asks the bot's own gates, on the runner's thread
+                return builtins.ON_RUNNER[name](ctx, given)
             ask = calls[name](given if isinstance(given, dict) else {})
             return asyncio.run_coroutine_threadsafe(ask, self._loop).result(TOOL_SECONDS)  # type: ignore[arg-type]
 

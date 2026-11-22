@@ -352,8 +352,9 @@ bot's first Gmail connection; `ops/bots/gmail.py`); a bot with none fails that s
 | Tool | Input | Answers |
 |---|---|---|
 | `inbox_applications` | `{given?, q?, most?}` | `{applications, rejected, polled}`: the application `given` holds (a resume's text, or `{resume, letter?, sender?, role?}`, the person's own: no sender checks), else the new messages of the Gmail search `q` (at most `most`, 25; 100 at most), each read whole (headers, text, attachments of at most 5 MB as PDF, DOCX or text) |
-| `screen_verdicts` | `{applications, rejected, source, fit, made}` (the gates' `decisions`) | `{verdicts, rejected, summary}`: per applicant its `verdict` (`pursue`, `pass`, `spam` or `waiting`) and each gate's `{outcome, confidence, by}` (confidence Ada's probability, 1 for the person's answer) |
-| `inbox_label` | `{verdicts, rejected}` | `{labelled}`: each screened message labelled `Screened` and `Screened/Pursue`, `/Pass` or `/Spam` (a refused one `/Spam`), the labels made where missing |
+| `probe_generated` | `{applications, gate}` | `{generated, human, reference}`: the gate asked about each application (on the runner's thread, with the bot's own Ada key; `ops/bots/probe.py`), those whose nearest precedent's similarity is at least the gate's reference p5 sent on as `generated`, the rest `human` (`{id, nearest}`); a gate with no reference (unseeded, or a bot on a rrotor) is sent them all |
+| `screen_verdicts` | `{applications, rejected, source, fit, probe, made}` (the gates' `decisions`, the probe's data) | `{verdicts, rejected, summary}`: per applicant its `verdict` (`strong`, `borderline`, `poor`, `spam` or `waiting`), its `fit`, `generated` and `source` each `{outcome, confidence, by}` (confidence Ada's probability, 1 for the person's answer); `generated` is `{outcome: human, by: probe, nearest, reference}` for one the probe found human |
+| `inbox_label` | `{verdicts, rejected}` | `{labelled}`: each screened message labelled `Screened` and `Screened/Strong`, `/Borderline`, `/Poor` or `/Spam` (a refused one `/Spam`), the labels made where missing |
 
 An application (`ops/bots/applicants.py`) is one item: the sender (`from`, `domain`, `sender_kind` free, company,
 edu or unknown), `auth` (SPF, DKIM and DMARC as the receiving server found them, from `Authentication-Results` and
@@ -366,15 +367,19 @@ with nothing to screen. Measuring is code; deciding is Ada's alone.
 
 **Seed sets** (`ops/bots/seeds.py`): a gate's `seed_from` names a set Glyphh ships (`library/seeds/<name>.json`;
 another name is 422), whose cases are recorded as the gate's first precedents when its model is made (at the bot's
-first run), each item made by the code a run uses and its case filled as the loop fills it; a set's case is a
-precedent of each gate its `labels` names. The SDK ignores the key.
+first run), each item made by the code a run uses and its case filled as the loop fills it; a case of the set's
+`train` split is a precedent of each gate its `labels` names, one of its `test` split never is. A gate with `probe`
+also gets its reference: its nearest precedent's similarity (the gate's own, on Ada's receipts) over the test split's
+cases, its p5, p25, p50, p75 and p95 kept in the runner's state for `probe_generated`. The SDK ignores both keys.
 
 **The Resume Screener** (`library/resume-screener.json`): Gmail in; `inbox_applications`; three gates over the
-applicants, each its own Ada model seeded from `resume-screener` (200 past applicants to five roles, generated and
-labelled by `scripts/resume-screener-seed.py`): `source` (`real` or `spam`, asks under 0.7), `fit` (`pursue` or
-`pass` for the role, from the role, skills, titles, years and degree; under 0.7) and `made` (how much of it was
-generated: `none`, `some`, `mostly`, `fully`, from the writing's signals; under 0.55); then `screen_verdicts` and
-`inbox_label`. Every hour, and on demand with a resume as `$input`. What a gate is unsure of waits for the person
+applicants, each its own Ada model seeded from `resume-screener` (200 past applicants to five roles, one in five held
+out as the test split, generated and labelled by `scripts/resume-screener-seed.py`): `source` (`real` or `spam`,
+asks under 0.7), `fit` (`strong`, `borderline` or `poor` for the role, from the role, skills, titles, years and
+degree; under 0.7) and `made` (how much of it was generated: `some`, `mostly` or `fully`, from the writing's signals;
+under 0.55). There is no human class: `made` holds only generated applications, and `probe_generated` before it
+answers human for one with no generated precedent as close as its reference's p5, so the gate decides only the
+rest. Then `screen_verdicts` and `inbox_label`. A probed-human application has no `made` call to correct. Every hour, and on demand with a resume as `$input`. What a gate is unsure of waits for the person
 as one batch; `wrong` on a gate's call is learned. Its connector tools (`connector_tools`): `screen_application`,
 `screen_inbox`, `applicants`, `correct` (fit), `correct_generated`, `correct_source` and `screener_answer`.
 

@@ -2,10 +2,13 @@
 labelled applications to a small software company's five open roles, the precedents its three gates start from.
 
 Every applicant is made up (names, employers, schools, numbers). Each is labelled the way a hiring manager there
-would: `source` (a real applicant, or spam: staffing pitches, resume mills, scams), `fit` (pursue or pass, from how
-the resume meets the role, with a few judgment calls that go against the grain, as people's do) and `made` (how much
-of the application was generated: none, some, mostly, fully; the text is written in that voice). Run it again to
-remake the file (the same seed makes the same file):
+would: `source` (a real applicant, or spam: staffing pitches, resume mills, scams), `fit` (strong, borderline or
+poor, from how the resume meets the role, with a few judgment calls that go against the grain, as people's do) and
+`made` (how much of a generated application was generated: some, mostly or fully; the text is written in that
+voice). The applicants written by people carry no `made` label: there is no human class, a human application is one
+with no close generated precedent when the gate is probed. One in five is `split` test: never recorded, it is what
+the gates are scored on and the probe's reference is measured over. Run it again to remake the file (the same seed
+makes the same file):
 
     uv run python scripts/resume-screener-seed.py
 """
@@ -16,6 +19,7 @@ from pathlib import Path
 
 OUT = Path(__file__).resolve().parent.parent / "src/glyphh_server/ops/bots/library/seeds/resume-screener.json"
 R = random.Random(20261122)
+FITS = ["strong", "borderline", "poor"]  # a judgment call goes one level the other way
 
 ROLES = {
     "Senior Backend Engineer": {
@@ -329,9 +333,9 @@ def pick(xs: list, k: int) -> list:
 
 
 def skills_for(role: dict, fit: str) -> list[str]:
-    if fit == "pursue":
+    if fit == "strong":
         got = pick(role["core"], R.randint(3, 5)) + pick(role["nice"], R.randint(1, 3))
-    elif R.random() < 0.5:  # near miss: some of the role, not enough
+    elif fit == "borderline":  # a near miss: some of the role, not enough
         got = pick(role["core"], R.randint(0, 2)) + pick(role["nice"], R.randint(0, 2)) + pick(OFF_SKILLS, 2)
     else:  # another career
         got = pick(OFF_SKILLS, R.randint(3, 6)) + pick(role["nice"], R.randint(0, 1))
@@ -343,7 +347,7 @@ def history(role: dict, fit: str, years: int) -> list[tuple[str, str, int, int]]
     left = max(1, years)
     while left > 0 and len(jobs) < 4:
         span = min(left, R.randint(1, 5))
-        on_role = fit == "pursue" or R.random() < 0.35
+        on_role = fit == "strong" or R.random() < (0.6 if fit == "borderline" else 0.1)
         title = R.choice(role["titles"]) if on_role else R.choice(OFF_TITLES)
         jobs.append((title, R.choice(EMPLOYERS), end - span, end))
         end -= span
@@ -410,20 +414,20 @@ def resume(name: str, email: str, role: dict, fit: str, made: str, years: int, s
 def applicant(i: int) -> dict:
     title = R.choice(list(ROLES))
     role = ROLES[title]
-    fit = "pursue" if R.random() < 0.42 else "pass"
+    fit = R.choices(FITS, [35, 30, 35])[0]
     made = R.choices(["none", "some", "mostly", "fully"], [40, 25, 20, 15])[0]
     low, high = role["years"]
-    years = R.randint(low, high) if fit == "pursue" else R.choice([R.randint(0, max(0, low - 1)), R.randint(low, high)])
+    years = R.randint(low, high) if fit == "strong" else R.choice([R.randint(0, max(0, low - 1)), R.randint(low, high)])
     name = f"{R.choice(FIRST)} {R.choice(LAST)}"
     email = f"{name.lower().replace(' ', '.').replace('á', 'a')}{R.randint(1, 99)}@{R.choice(COMPANY_MAIL)}"
     school = (R.choice(["bachelors", "bachelors", "masters", "phd", "none"]), R.choice(SCHOOLS))
     subject = R.choice([f"Application: {title}", f"{title} - {name}", f"Applying for {title}", f"{title} role"])
-    label = fit if R.random() > 0.06 else ("pass" if fit == "pursue" else "pursue")  # a judgment call
+    label = fit if R.random() > 0.06 else ("borderline" if fit != "borderline" else R.choice(["strong", "poor"]))
     return {
         "from": f"{name} <{email}>", "subject": subject, "auth": "spf=pass dkim=pass dmarc=pass", "bulk": False,
         "body": cover(name, title, role, made, years), "resume_kind": R.choice(["pdf", "pdf", "docx", "text"]),
         "resume": resume(name, email, role, fit, made, years, school),
-        "labels": {"source": "real", "fit": label, "made": made},
+        "labels": {"source": "real", "fit": label} | ({} if made == "none" else {"made": made}),
     }  # fmt: skip
 
 
@@ -450,7 +454,7 @@ def main() -> None:
     made = [applicant(i) for i in range(176)] + [spam(i) for i in range(24)]
     R.shuffle(made)
     for i, a in enumerate(made, 1):
-        a["id"] = f"seed-{i:03d}"
+        a["id"], a["split"] = f"seed-{i:03d}", "test" if i % 5 == 0 else "train"
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(
         json.dumps(
