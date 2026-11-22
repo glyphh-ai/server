@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from glyphh_server.app import create_app
 from glyphh_server.config import Settings
+from glyphh_server.ops.bots.access import WithEffort
 from tests.bots.fakes import PROJECT, FakeAda, FakeAnthropic, FakePipedream, account, pipedream_http
 from tests.conftest import SETTINGS, _client
 from tests.db.helpers import Person
@@ -78,9 +79,9 @@ def faked(app: FastAPI, ada: FakeAda, claude: FakeAnthropic) -> None:
         ada.keys.append(key)
         return ada
 
-    def claude_for(key: str, model: str) -> ApiClaude:
+    def claude_for(key: str, model: str, effort: str | None = None) -> ApiClaude:
         claude.keys.append(key)
-        return ApiClaude(client=claude, model=model)
+        return ApiClaude(client=WithEffort(claude, effort), model=model)  # as goes._claude wraps the real client
 
     async def check_key(key: str) -> str | None:
         return "Anthropic does not take that key." if key.endswith("-bad") else None

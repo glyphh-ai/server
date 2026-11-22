@@ -61,8 +61,17 @@ async def list_voices(caller: Caller) -> voices.Voices:
 
 @router.get("/v1/bots/places", operation_id="listBotPlaces")
 async def list_places(caller: Caller, conn: Conn) -> places.Places:
-    """Where a bot can run: Glyphh cloud, then the org's rrotors, each with whether it is linked right now."""
+    """Where a bot can run: Glyphh cloud, then the org's rrotors, each with whether it is linked right now and the
+    address a browser reads the machine itself at (`url`)."""
     return await places.listing(conn)
+
+
+@router.post("/v1/bots/places/{rrotor_id}/ticket", operation_id="getBotPlaceTicket")
+async def place_ticket(rrotor_id: uuid.UUID, request: Request, who: Caller, conn: Conn) -> places.Ticket:
+    """A ticket for the person's browser to read one of the org's rrotors itself, at its own address (the folders a
+    bot may be given: `GET {url}/v1/folders`; the crew's work): `Authorization: Bearer <token>`, good ten minutes.
+    What it opens never passes through Glyphh. 422, reason runs_on, when it is not one of the org's rrotors."""
+    return await places.ticket(conn, request.app.state.signing_key, who.user_id, rrotor_id)
 
 
 @router.get("/v1/bot-templates", operation_id="listBotTemplates")
