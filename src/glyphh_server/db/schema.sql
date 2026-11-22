@@ -512,13 +512,16 @@ CREATE TABLE IF NOT EXISTS bots (
     next_run_at TIMESTAMP WITH TIME ZONE,
     runs_on UUID,
     connector_tools JSONB DEFAULT '[]'::jsonb NOT NULL,
+    folders JSONB DEFAULT '[]'::jsonb NOT NULL,
+    effort TEXT DEFAULT 'medium' NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
     PRIMARY KEY (id),
     FOREIGN KEY(org_id) REFERENCES orgs (id) ON DELETE CASCADE,
     FOREIGN KEY(created_by) REFERENCES users (id) ON DELETE SET NULL,
     FOREIGN KEY(runs_on) REFERENCES rrotors (id) ON DELETE SET NULL,
-    CONSTRAINT bots_permission_mode CHECK (permission_mode IN ('ask', 'connection', 'auto'))
+    CONSTRAINT bots_permission_mode CHECK (permission_mode IN ('ask', 'connection', 'auto')),
+    CONSTRAINT bots_effort CHECK (effort IN ('low', 'medium', 'high', 'xhigh', 'max'))
 );
 CREATE UNIQUE INDEX IF NOT EXISTS bots_one_slug ON bots (org_id, slug);
 CREATE INDEX IF NOT EXISTS bots_due ON bots (next_run_at) WHERE next_run_at IS NOT NULL;
