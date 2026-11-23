@@ -17,11 +17,22 @@ the program's code.
 """PR review digest: the pull requests waiting on my review, the ones for today posted to Slack."""
 
 FLOW = [
-    {"id": "find", "kind": "tool", "tool": "github-search-issues-and-pull-requests",
-     "input": {"q": "is:pr is:open review-requested:@me"}, "next": "pick", "at": [0, 0]},
+    {
+        "id": "find",
+        "kind": "tool",
+        "tool": "github-search-issues-and-pull-requests",
+        "input": {"q": "is:pr is:open review-requested:@me"},
+        "next": "pick",
+        "at": [0, 0],
+    },
     {"id": "pick", "kind": "bot", "task": "Which of these need my review today?\n\n{find}", "next": "ok"},
-    {"id": "ok", "kind": "ask", "question": "Post the digest?", "options": ["yes", "no"],
-     "next": {"yes": "post", "no": None}},
+    {
+        "id": "ok",
+        "kind": "ask",
+        "question": "Post the digest?",
+        "options": ["yes", "no"],
+        "next": {"yes": "post", "no": None},
+    },
     {"id": "post", "kind": "tool", "tool": "slack-send-message", "input": {"channel": "@me", "text": "{pick}"}},
 ]
 ```
