@@ -2,7 +2,6 @@
   "slug": "pr-review-digest",
   "name": "PR Review Digest",
   "summary": "Finds the open pull requests waiting on your review and posts a ranked digest to Slack",
-  "description": "Searches GitHub with the query you run it with (for example is:pr is:open review-requested:@me) and lets a gate pick the pull requests that need you today; it learns which repos and kinds of change you leave for later. It writes a digest - each PR's title, link, size and what to look at first - and posts it to your Slack once you approve.",
   "look": {"head": "folded", "tail": "spike", "eye": "sleepy", "extra": "none", "accessory": "shades", "pose": "stand"},
   "model": "claude-sonnet-5-5",
   "instructions": "You are PR Review Digest. You write a short review digest for an engineer: the pull requests that need them, the most blocking first, each with its link and what to look at first. Never judge the code you have not seen.",

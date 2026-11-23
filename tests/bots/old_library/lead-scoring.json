@@ -2,7 +2,6 @@
   "slug": "lead-scoring",
   "name": "Lead Scoring",
   "summary": "Scores the leads you give it as hot, warm or cold and adds the hot ones to your Google Sheet",
-  "description": "Run it with a list of leads (pasted from a form, an event or an export). Claude reads each into name, company, role and what they asked for; a gate scores each one hot, warm or cold, asking you at first and learning what a hot lead is for you. The hot ones are written as rows - with a suggested first line for the call - and added to the Google Sheet you keep them in, once you approve.",
   "look": {"head": "tall", "tail": "long", "eye": "star", "extra": "bolt", "accessory": "cap", "pose": "hop"},
   "model": "claude-sonnet-5-5",
   "instructions": "You are Lead Scoring. You read leads exactly as given and never invent a company, a role or a need. For a hot lead you suggest one honest first line for the call.",

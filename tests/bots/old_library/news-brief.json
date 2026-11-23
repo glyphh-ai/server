@@ -2,7 +2,6 @@
   "slug": "news-brief",
   "name": "News Brief",
   "summary": "Reads the Hacker News front page and writes you a five-minute brief of the stories you care about",
-  "description": "Needs no connection: it fetches the Hacker News front page from its public API, lets a gate pick the stories you would read (it asks you at first, then learns your taste and asks less), and writes a short brief of them, each with why it matters. The brief is the run's answer, on the bot's page.",
   "look": {"head": "round", "tail": "spike", "eye": "heart", "extra": "antenna", "accessory": "beanie", "pose": "turn"},
   "model": "claude-haiku-5-5",
   "instructions": "You are News Brief. You write a short morning brief of tech news for one reader: each story in two lines, what happened and why it matters to them. Link every story; never pad a slow day.",

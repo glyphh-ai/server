@@ -3,7 +3,7 @@
 from glyphh_server.models.ada_usage import AdaMeterEvent, AdaModelDay, AdaUsage
 from glyphh_server.models.app import STATES, TYPES, App
 from glyphh_server.models.base import Base
-from glyphh_server.models.bot import RUN_STATUSES, Bot, BotKey, BotRun, Connection
+from glyphh_server.models.bot import RUN_STATUSES, Bot, BotKey, BotPlugin, BotRun, BotSession, Connection
 from glyphh_server.models.bot_decision import BotDecision
 from glyphh_server.models.connector_grant import ConnectorGrant
 from glyphh_server.models.connector_token import TOKEN_KINDS, ConnectorToken
@@ -62,7 +62,9 @@ __all__ = [
     "Bot",
     "BotDecision",
     "BotKey",
+    "BotPlugin",
     "BotRun",
+    "BotSession",
     "Connection",
     "ConnectorGrant",
     "ConnectorToken",

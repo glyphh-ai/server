@@ -2,7 +2,6 @@
   "slug": "resume-screener",
   "name": "Resume Screener",
   "summary": "Screens the job applications in your Gmail: real or spam, a strong, borderline or poor fit, and how much of each was generated",
-  "description": "Every hour it reads the new applications in your Gmail (a resume as PDF, Word or text, and the email around it). Code checks the sender first: a message whose domain did not vouch for it is refused. Then three Ada models, your own, decide from past applicants: is the sender a real applicant or spam, is the applicant a strong, borderline or poor fit for the role, and how much of the application was generated (some, mostly or fully), each with its confidence. The generated model holds only generated applications: one with no close generated precedent is called human, with how near the nearest came. They start from past applicants (generated and labelled) and learn from you: what they are unsure of they ask you, and every verdict you correct is a new precedent. Each screened email is labelled in Gmail with its verdict, and your Glyphh connection gains screen_application, applicants and correct.",
   "look": {"head": "classic", "tail": "long", "eye": "side", "extra": "none", "accessory": "glasses", "pose": "lean"},
   "model": "claude-sonnet-5-5",
   "instructions": "You are Resume Screener. You read job applications exactly as given and never invent an applicant's experience, skills or employers.",
