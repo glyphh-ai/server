@@ -11,6 +11,7 @@ import httpx
 import pytest
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from tests.bots import programs
 from tests.bots.conftest import BOTS, Served, answered, ran, serve
 from tests.bots.fakes import CONNECT, FakePipedream
 from tests.bots.market import installed, linked
@@ -115,3 +116,31 @@ async def test_pr_review_digest_talks_then_searches_through_ada(live: tuple[Serv
     assert "decision" in asked, asked  # Ada was asked about the pull requests, and asked the person
     assert s.ada.outcomes(gate)[-1] == "today"  # the person's answer was learned
     assert run["status"] == "done" and run["output"].strip(), run
+
+
+async def test_the_templates_program_runs_end_to_end(live: tuple[Served, Watched], ana: Person) -> None:
+    """PR Review Digest's program.py, walked by the server with the real agent doing its bot steps: the digest
+    written, the person asked before it is posted, then posted; every step on the run's audit trail."""
+    s, _ = live
+    await linked(s, ana, "github", "slack")
+    bot = await installed(s, ana, "pr-review-digest")
+    s.ada.rule[f"bot-{bot['slug']}-gate-today"] = lambda case: ("today", 0.95)  # Ada is sure: nothing to ask
+    (program,) = (await s.http.get("/v1/programs", headers=ana.headers)).json()["programs"]
+    run = await programs.ran(s, ana, program["slug"], "")
+    asked: list[str] = []
+    for _ in range(8):
+        if run["status"] != "needs_input":
+            break
+        q = run["question"]
+        asked.append(q["kind"])
+        print("\nASKED ->", q["kind"], "|", q["question"][:400])
+        answer = "Post" if q["kind"] == "ask" else "yes" if q.get("approval") else "rest=today"
+        run = await programs.answered(s, ana, run["id"], answer)
+    trail = await programs.trail(s, ana, run["id"])
+    print("PROGRAM ->", run["status"], run["error"], "\nposted:", run["outputs"].get("post"), "\ntrail:", trail)
+    assert run["status"] == "done", run
+    assert "ask" in asked and [r["id"] for r in s.pd.runs if r["id"] == POST], (asked, s.pd.runs)
+    assert [t[:3] for t in trail if t[0] == "step"] == [
+        ("step", "digest", bot["slug"]),
+        ("step", "post", bot["slug"]),
+    ]
