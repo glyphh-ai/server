@@ -55,12 +55,12 @@ class Metered:
 
 
 def output(bot: Any, result: RunResult) -> str:
-    """The run's answer as text: the data of the last of its loop's steps that has any."""
+    """The run's answer as text: what the last of its loop's steps to write words wrote. A tool's answer is data, not
+    words for a person (cut to fit it is not even JSON any more): it stays in the run's data."""
     for step in reversed(bot.spec.get("loop") or []):
         value = result.data.get(step.get("id")) if isinstance(step, dict) else None
-        if value is not None:
-            text = value if isinstance(value, str) else json.dumps(value, default=str)
-            return text[:OUTPUT_MAX]
+        if isinstance(value, str) and value.strip():
+            return value[:OUTPUT_MAX]
     return ""
 
 

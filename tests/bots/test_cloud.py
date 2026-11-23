@@ -107,3 +107,6 @@ def test_a_run_whose_steps_left_nothing_has_no_output() -> None:
     bot = SimpleNamespace(spec={"loop": [{"id": "a"}, "not a step"]})
     assert engine.output(bot, SimpleNamespace(data={})) == ""
     assert engine.output(bot, SimpleNamespace(data={"a": "x" * (engine.OUTPUT_MAX + 5)})) == "x" * engine.OUTPUT_MAX
+    told = SimpleNamespace(spec={"loop": [{"id": "said"}, {"id": "sent"}]})  # a tool's answer is never the words
+    assert engine.output(told, SimpleNamespace(data={"said": "Posted it.", "sent": {"ret": [{"id": 1}]}})) == "Posted it."
+    assert engine.output(told, SimpleNamespace(data={"sent": {"ret": [{"id": 1}]}})) == ""

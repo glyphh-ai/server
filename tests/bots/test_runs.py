@@ -56,7 +56,7 @@ async def test_a_run_asks_learns_drafts_waits_for_a_yes_and_sends(served: Served
     assert run["status"] == "done" and run["question"] is None and run["finished_at"]
     assert served.pd.runs[1]["id"] == "gmail-send-email"
     assert served.pd.runs[1]["configured_props"]["body"] == "Happy to, see you Friday."
-    assert run["data"]["send"]["ret"] == {"id": "msg_1"} and '"msg_1"' in run["output"]
+    assert run["data"]["send"]["ret"] == {"id": "msg_1"} and run["output"] == "Happy to, see you Friday."
     assert (run["input_tokens"], run["output_tokens"], run["own_key"]) == (1000, 200, False)
     assert any("gmail-send-email" in line for line in run["log"])
     assert set(served.claude.keys) == {"sk-ant-glyphh-test-key"}

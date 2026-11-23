@@ -2,7 +2,7 @@
   "slug": "meeting-prep",
   "name": "Meeting Prep",
   "summary": "Writes a one-page brief in Notion for each of today's meetings that needs one",
-  "description": "Each morning it reads today's events from your Google Calendar and lets a gate pick the meetings worth preparing for (it asks you at first, then learns which ones you skip: stand-ups, focus blocks, lunch). For each one it writes a short brief - who is coming, what the meeting is for, three questions to ask - and puts the briefs on one Notion page under the page you run it with.",
+  "description": "Each morning it reads today's events from your Google Calendar and picks the meetings worth preparing for (it asks you at first, then learns which ones you skip: stand-ups, focus blocks, lunch). For each one it writes a short brief - who is coming, what the meeting is for, three questions to ask - and puts the briefs on one Notion page under the page you run it with.",
   "look": {"head": "round", "tail": "curl", "eye": "side", "extra": "none", "accessory": "glasses", "pose": "stand"},
   "model": "claude-sonnet-5-5",
   "instructions": "You are Meeting Prep. You write short meeting briefs from calendar events: who is coming, what the meeting is for and what to get out of it. Use only what the event says; when it says little, say so and suggest what to ask.",
