@@ -8,7 +8,7 @@ import logging
 import uuid
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from glyphh_server.db import tenancy
 from glyphh_server.errors import Conflict, Invalid
@@ -123,10 +123,10 @@ class Programs(Walker):
         async with self.engine.begin() as conn:
             await tenancy.enter(conn, org_id)
             waiting = ProgramRun.question["child_run"].astext == str(bot_run_id)
-            found = (await conn.execute(select(ProgramRun.id).where(ProgramRun.status == "needs_input", waiting))).all()
-        for (run_id,) in found:
-            if await runs.put(self.engine, org_id, run_id, when="needs_input", status="queued", question={}):
-                self.spawn(org_id, run_id)
+            woke = update(ProgramRun).where(ProgramRun.status == "needs_input", waiting)
+            found = (await conn.execute(woke.values(status="queued", question={}).returning(ProgramRun.id))).all()
+        for (run_id,) in found:  # each taken once, by the statement
+            self.spawn(org_id, run_id)
 
     async def recover(self) -> int:
         cut = await runs.recover(self.engine)

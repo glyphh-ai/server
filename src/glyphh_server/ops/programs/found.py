@@ -65,12 +65,9 @@ async def search(pd: Pipedream, engine: AsyncEngine, who: Principal, q: str, bot
 
 
 def _scopes(scopes: list[dict[str, Any]], connection_id: str, tool: str) -> list[dict[str, Any]]:
-    kept = [dict(s) for s in scopes]
-    for s in kept:
-        if s["connection_id"] == connection_id:
-            s["tools"] = sorted({*s["tools"], tool})
-            return kept
-    return [*kept, {"connection_id": connection_id, "tools": [tool]}]
+    had = {s["connection_id"]: list(s["tools"]) for s in scopes}
+    had[connection_id] = sorted({*had.get(connection_id, []), tool})
+    return [{"connection_id": c, "tools": t} for c, t in had.items()]
 
 
 async def add(pd: Pipedream, engine: AsyncEngine, who: Principal, slug: str, body: AddToolIn) -> None:
