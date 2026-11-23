@@ -4,7 +4,8 @@ decides, its example prompts and where it can run. Installing one makes the org'
 (its name, cat, instructions, decisions, standing task and examples), scoped to the org's connection of each app it
 needs, and keeps the package as the bot's plugin at the version installed. It is refused until every app is
 connected (naming the ones missing), and, for a template that runs only on a rrotor, until the org has one linked.
-The copy is the org's: changing it never touches the template."""
+A template with a program (program.py) installs it too, as the org's program done by the new bot. The copy is the
+org's: changing it never touches the template."""
 
 import copy
 from typing import Any
@@ -17,10 +18,13 @@ from glyphh_server.errors import Invalid, NotFound
 from glyphh_server.models import Connection
 from glyphh_server.ops.auth.principal import Principal
 from glyphh_server.ops.bots import botviews, installed, packages, places, store
+from glyphh_server.ops.bots import package_parts as parts
 from glyphh_server.ops.bots.exposed import ConnectorTool
 from glyphh_server.ops.bots.schedule import Schedule
 from glyphh_server.ops.bots.shape import Place
 from glyphh_server.ops.bots.views import BotIn, BotView, ScopeIn
+from glyphh_server.ops.programs import store as programs
+from glyphh_server.ops.programs.views import ProgramIn
 
 MISSING: str = "There is no such bot template."
 NO_RROTOR: str = "{name} needs a rrotor: it cannot run on Glyphh cloud. Set one up, link it, then install it."
@@ -144,4 +148,8 @@ async def install(
     )  # fmt: skip
     bot = await store.made(conn, who, secret, body)
     await installed.keep(conn, bot, p)
+    if parts.PROGRAM in p.files:  # its program, done by the bot, where the bot runs
+        made = ProgramIn(name=bot.name, summary=side.bot.tagline, source=p.files[parts.PROGRAM], bot=bot.slug,
+                         runs_on=bot.runs_on)  # fmt: skip
+        await programs.made(conn, who, made, template=slug)
     return await botviews.view(conn, bot)

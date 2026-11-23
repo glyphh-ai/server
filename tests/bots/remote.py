@@ -137,15 +137,15 @@ async def row(engine: AsyncEngine, run_id: Any) -> Any:
 
 
 @contextmanager
-def logged() -> Iterator[list[logging.LogRecord]]:
-    """What the bots log meanwhile (whether or not pytest's own log capture is on)."""
+def logged(name: str = "glyphh.bots") -> Iterator[list[logging.LogRecord]]:
+    """What the bots (or the logger named) log meanwhile (whether or not pytest's own log capture is on)."""
     said: list[logging.LogRecord] = []
 
     class Kept(logging.Handler):
         def emit(self, record: logging.LogRecord) -> None:
             said.append(record)
 
-    log, kept = logging.getLogger("glyphh.bots"), Kept(logging.INFO)
+    log, kept = logging.getLogger(name), Kept(logging.INFO)
     level = log.level
     log.addHandler(kept)
     log.setLevel(logging.INFO)

@@ -1,4 +1,10 @@
-# A bot is a Claude agent you talk to, with Ada as its gate
+# A bot is a Claude agent you talk to, driven by its instructions
+
+> **Ruling, 2026-11-23.** A bot is the Agent SDK loop driven by its instructions. Ada is not a gate in front of the
+> tools: it is two tools the instructions direct (`decide`, `ask_person`, section 4). The permission callback holds
+> only allow / ask / deny and the permission mode (section 5). `gates` stays as a storage name (`spec.gates`,
+> `bot-<slug>-gate-<name>`, `bot_decisions.gate`, the `/gates` route). A bot may have a program beside it, a
+> deterministic workflow: [programs.md](programs.md).
 
 The design for the bots' engine (2026-11-22). It replaces the fixed loop of steps (`spec.loop`, walked by
 `glyphh.bots.Runner`) with one Claude Agent SDK conversation turn per run. `bots.md` section 9 and
@@ -61,8 +67,9 @@ One SDK MCP server, `bot`. Names are the tool's key with `-` as `_`.
 
 | Tools | From | Asked about? |
 |---|---|---|
-| The connections' tools | Each tool of `bots.scopes`: a Pipedream action, described by its component (name, description, its configurable props as a JSON schema; the app prop is filled with the connection's account, never offered) | By the permission gate (section 5) |
-| `decide` | When the bot has decisions (section 4) | Never asks permission; may ask the person about items |
+| The connections' tools | Each tool of `bots.scopes`: a Pipedream action, described by its component (name, description, its configurable props as a JSON schema; the app prop is filled with the connection's account, never offered) | By its permissions (section 5) |
+| `decide` | When the bot has decisions (section 4) | Never asks |
+| `ask_person` | Always (section 4) | It is the asking: the run stops with the question |
 | `fetch` | When `spec.hosts` names hosts: a GET of JSON, https, public addresses, no redirects, 5 MB | No (read-only) |
 | Built-ins (`inbox_applications`, `inbox_label`) | The Gmail built-ins a template's sidecar names (`builtins`) | `inbox_label` as an action |
 | Orchestrator tools | Only the org's orchestrator (section 8): `list_bots`, `ask_bot`, `crew_start`, `crew_status`, `crew_stop` | `ask_bot`/`crew_*` never ask themselves; the bot handed the work asks by its own mode |
@@ -83,32 +90,26 @@ Nothing else. The lock, on Glyphh cloud:
 Tests prove it: the options built for a cloud bot carry no built-in tool, and the live check reads the session's own
 tool list from the SDK's `init` message.
 
-## 4. Ada decides (the gate on items)
+## 4. Ada: two tools the instructions direct
 
-A bot's **decisions** are `spec.gates`, unchanged: per name its `outcomes`, `question`, Ada `spec`, `case` mapping
-(`$item.x`), policy (`ask_below`, `min_precedents`, `audit`, `shadow`, `max_questions`, `default`, `world`),
-`seed`/`seed_from`. Their Ada models, names and seeds are untouched.
+A bot's **decisions** are `spec.gates` (a storage name), unchanged: per name its `outcomes`, `question`, Ada `spec`,
+`case` mapping (`$item.x`), policy (`ask_below`, `min_precedents`, `audit`, `shadow`, `max_questions`, `default`,
+`world`), `seed`/`seed_from`. Their Ada models, names and seeds are untouched. Nothing decides in front of the
+agent: its instructions say when to call these two tools, like any other (`ops/bots/agent/desk.py`, `deciding.py`).
 
-`decide(decision, items[])` answers, per item, `{item, outcome, by: "ada" | "you" | "default", confidence}`.
-
-1. The permission callback sees the call first. It opens the bot's state (the SDK's `RunStore`), makes each item's
-   case, asks the decision's Ada model, and applies the SDK's own policy (`glyphh.bots.Policy.judge`): Ada's sure
-   calls stand; the rest are to ask.
-2. Nothing to ask: the call is allowed and the tool answers. Each decision is kept in the runner's store
-   (`keep_decision`, kind `each`, step `decide-<n>`) and copied to `bot_decisions` exactly as before (`decided.sync`).
-3. Something to ask: the pending call is kept on the run (`data._pending`), the run's `question` is the batch
-   question the platform already shows (`question`, `options`, `batch: [{n, label, guess, p, why}]`), and the turn
-   stops (2.1).
-4. The person answers (`N=outcome`, `rest=outcome`, or a map: `mend.fits`, unchanged). Each answer is recorded as a
-   precedent in the decision's Ada model (unless `world`) and kept as a decision by `you`; the finished call is kept
-   (`data._decided`). The session resumes with "The person answered: …. Call decide again with the same items."
-5. `decide` called again for those items answers from `data._decided`.
+- **`decide(decision, items[])`** asks the decision's Ada model about each item (the SDK's own policy,
+  `glyphh.bots.Policy.judge`) and answers, per item, `{id, item, outcome, by, confidence, sure}`. It never stops the
+  run. What Ada was sure of is kept as the run's decisions (the runner's store, copied to `bot_decisions`).
+- **`ask_person`** stops the run with a question (2.1). With `decision` and `items` it is the batch question the
+  platform shows (`question`, `options`, `batch: [{n, label, guess, p, why}]`), and each answer (`N=outcome`,
+  `rest=outcome`, or a map: `mend.fits`) is recorded as a precedent in that decision's Ada model (unless `world`)
+  and kept as a decision by the person; the session resumes with "The person answered (decision): …. Carry on with
+  these." With only `question` and `options` it is the bot's own question, and the session resumes with the answer.
 
 So the Decisions panel, Right/Wrong, relabel, confirm, cases, backtest and the nine training tools read the same
-tables and the same runner state as before. `wrong` works on an agent run because the run is saved in the runner's
-store with its `_gates` (each decision as a per-item gate).
+tables and the same runner state as before.
 
-## 5. Permission before acting (the gate on tools)
+## 5. Permission before acting
 
 `can_use_tool(tool, input)` for every tool that is not read-only. A tool is **read-only** when its Pipedream
 component says so (`annotations.readOnlyHint`), else when its key's verb is one of `get, list, find, search, read,
@@ -244,7 +245,12 @@ it runs one of the scripts a plugin's `code` declares, by name, inside the run's
 has. It is not a shell: no other command exists. On Glyphh cloud the tool does not exist and the prompt says which
 skills need a rrotor, so the bot says so plainly rather than pretending.
 
-No first template needs it: the Resume Screener's PDF and Word reading is Glyphh's own built-in tool
+A template may also carry a **program** (`program.py` beside `glyphh.json`): a deterministic workflow installed with
+the bot as the org's program ([programs.md](programs.md)). Its steps are walked by the server, on Glyphh cloud and on
+a rrotor; a `code` step of it runs only on a rrotor (`glyphh_bot`'s `code`), so a template whose program has one is
+`runs_on: ["rrotor"]`.
+
+No first template needs a script: the Resume Screener's PDF and Word reading is Glyphh's own built-in tool
 (`inbox_applications`), Glyphh's code and not a plugin's, as it was.
 
 ### 7.5 The marketplace

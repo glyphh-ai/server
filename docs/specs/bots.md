@@ -3,7 +3,7 @@
 > **Two things are called a bot here.** Sections 1 to 8 are the SDK's packaged bot (`glyphh bot`, a loop of steps a
 > person runs on their own Claude); they are unchanged. Sections 9 to 14 are the platform's hosted bots, which since
 > 2026-11-22 are **not** loops: a hosted bot is a Claude agent a person talks to, each run one Claude Agent SDK turn
-> with Ada as its gate. `bot-agent-loop.md` is that engine's design and is the reference for how a hosted bot runs.
+> driven by its instructions, Ada two tools those instructions direct. `bot-agent-loop.md` is that engine's design and is the reference for how a hosted bot runs.
 > In sections 9 to 14, read "gate" as a decision, and where a paragraph still speaks of a loop's steps (a step's
 > `approval`, `$step.ret`, `probe_generated`, `screen_verdicts`, `hint`), `bot-agent-loop.md` replaces it.
 

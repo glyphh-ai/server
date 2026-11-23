@@ -1,7 +1,8 @@
 """A bot template is a Claude plugin package (docs/specs/bot-agent-loop.md, 7): a folder under library/ with the
 standard manifest (.claude-plugin/plugin.json), the bot's know-how as skills (skills/<name>/SKILL.md) and Glyphh's
 sidecar (glyphh.json): the bot it makes, the apps and tools it requires, what Ada decides, its standing task and its
-examples. `check` says everything wrong with a package at once; `library` is the packages Glyphh ships."""
+examples; and, beside it, a program (program.py: docs/specs/programs.md) installed with the bot. `check` says
+everything wrong with a package at once; `library` is the packages Glyphh ships."""
 
 import json
 import re
@@ -75,9 +76,11 @@ class Package:
     runs_on: list[str]
 
 
-def runs_on(sidecar: Sidecar) -> list[str]:
-    """Where a package can run: one with code or folders needs a sandbox, so a rrotor only; any other, anywhere."""
-    return ["rrotor"] if sidecar.code or sidecar.folders else ["cloud", "rrotor"]
+def runs_on(sidecar: Sidecar, steps: list[dict[str, Any]] | None = None) -> list[str]:
+    """Where a package can run: one with code (its skills' scripts, its program's code steps) or folders needs a
+    sandbox, so a rrotor only; any other, anywhere."""
+    sandboxed = sidecar.code or sidecar.folders or parts.has_code(steps or [])
+    return ["rrotor"] if sandboxed else ["cloud", "rrotor"]
 
 
 def _texts(files: Mapping[str, str | bytes], problems: list[str]) -> dict[str, str]:
@@ -134,7 +137,7 @@ def _sidecar(texts: dict[str, str], problems: list[str]) -> Sidecar | None:
         return None
 
 
-def _fits(sidecar: Sidecar, skills: list[str], texts: dict[str, str]) -> list[str]:
+def _fits(sidecar: Sidecar, skills: list[str], texts: dict[str, str], steps: list[dict[str, Any]]) -> list[str]:
     """What a well-formed sidecar still gets wrong, each in a sentence."""
     out = [
         f"The tool {key} is not one of {r.app}'s: its key starts with {r.app}-."
@@ -149,7 +152,7 @@ def _fits(sidecar: Sidecar, skills: list[str], texts: dict[str, str]) -> list[st
         if c.skill not in skills:
             out.append(f"The code names the skill {c.skill}, which is not in the package.")
         out += [f"The code names the script {s}, which is not in the package." for s in c.scripts if s not in texts]
-    if sidecar.runs_on is not None and sidecar.runs_on != (fit := runs_on(sidecar)):
+    if sidecar.runs_on is not None and sidecar.runs_on != (fit := runs_on(sidecar, steps)):
         out.append(f"runs_on must be {json.dumps(fit)}: code and folders need a rrotor, anything else runs anywhere.")
     return out
 
@@ -160,14 +163,15 @@ def check(files: Mapping[str, str | bytes]) -> Package:
     texts = _texts(files, problems)
     manifest = _manifest(texts, problems)
     skills = parts.skills(texts, problems)
+    steps = parts.program(texts, problems)
     sidecar = _sidecar(texts, problems)
     if sidecar is not None:
-        problems += _fits(sidecar, skills, texts)
+        problems += _fits(sidecar, skills, texts, steps)
     if problems or sidecar is None:
         raise Invalid(f"The package does not fit: {len(problems)} to fix.", reason="package", problems=problems)
     return Package(
         slug=manifest["name"], version=manifest["version"], description=str(manifest.get("description") or ""),
-        sidecar=sidecar, files=texts, skills=skills, runs_on=runs_on(sidecar),
+        sidecar=sidecar, files=texts, skills=skills, runs_on=runs_on(sidecar, steps),
     )  # fmt: skip
 
 

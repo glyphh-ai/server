@@ -28,6 +28,7 @@ from glyphh_server.ops.bots.views import RunView, WrongIn
 from glyphh_server.ops.link.hub import Hub
 from glyphh_server.ops.link.presence import Runtime
 from glyphh_server.ops.link.protocol import Ran
+from glyphh_server.ops.programs.service import Programs
 from glyphh_server.ops.projects.service import Projects
 
 log = logging.getLogger("glyphh.bots")
@@ -40,12 +41,14 @@ class Bots(Tasks):
         super().__init__(engine_, redis, settings, http)
         self.remote = Remote(self, hub)
         self.projects = Projects(self, hub, http)
+        self.programs = Programs(self)
 
     async def recover(self) -> int:
         """At the server's start; without the database, the server starts anyway (health says it is degraded)."""
         try:
             cut = await runs.recover(self.engine, runs.machine())
             cut += await self.projects.recover(runs.machine())
+            cut += await self.programs.recover()
         except Exception:
             log.exception("could not fail the bot runs cut off by a restart")
             return 0
@@ -101,8 +104,8 @@ class Bots(Tasks):
         return await self.shown(who.org_id, run_id)
 
     async def landed(self, runtime: Runtime, msg: Ran) -> None:
-        """A result over a rrotor's link: a bot run's, else a project's step's."""
-        if not await remote_out.landed(self.remote, runtime, msg):
+        """A result over a rrotor's link: a bot run's, a program run's code step's, else a project's step's."""
+        if not await remote_out.landed(self.remote, runtime, msg) and not await self.programs.landed(runtime, msg):
             await self.projects.landed(runtime, msg)
 
     async def wrong(self, who: Principal, run_id: uuid.UUID, body: WrongIn) -> dict[str, Any]:
@@ -126,15 +129,23 @@ class Bots(Tasks):
             await self.remote.drop(found)
         return shown
 
+    async def _woken(self, org_id: uuid.UUID, run_id: uuid.UUID) -> None:
+        """A run over: what waited on it (a run of the orchestrator, a program's run) carries on."""
+        await super()._woken(org_id, run_id)
+        await self.programs.woken(org_id, run_id)
+
     async def gates(self, who: Principal, slug: str) -> dict[str, Any]:
         """What the bot's decisions have learned: per decision its precedents, how often it asked and was right."""
         return await mend.gates(self, who, slug)
 
     async def wait(self) -> None:
         """Every run started here, finished (the tests')."""
-        await super().wait()
+        while self.tasks or self.programs.tasks:  # a program's bot step starts a bot run, and its end wakes a program
+            await super().wait()
+            await self.programs.wait()
         await self.projects.wait()
 
     async def close(self) -> None:
         await super().close()
         await self.projects.close()
+        await self.programs.close()

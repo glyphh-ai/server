@@ -1,9 +1,15 @@
-"""A part of a bot template's package (ops/bots/packages.py) read and checked: its skills (skills/<name>/SKILL.md)."""
+"""Two parts of a bot template's package (ops/bots/packages.py) read and checked: its skills (skills/<name>/SKILL.md)
+and its program (program.py, docs/specs/programs.md): the program's steps, read without running the file, each
+problem said. A program with a code step runs on a rrotor, so its package does too."""
 
 import re
+from typing import Any
+
+from glyphh_server.ops.programs import flow
 
 IN_SKILL: re.Pattern[str] = re.compile(r"skills/([^/]+)/(.+)")
 FRONT: re.Pattern[str] = re.compile(r"\A---\n(.*?)\n---(\n|\Z)", re.S)
+PROGRAM: str = "program.py"
 
 
 def skills(texts: dict[str, str], problems: list[str]) -> list[str]:
@@ -21,3 +27,20 @@ def skills(texts: dict[str, str], problems: list[str]) -> list[str]:
         elif said["name"].strip() != name:
             problems.append(f"{path} names itself {said['name'].strip()}: a skill is named as its folder, {name}.")
     return names
+
+
+def program(texts: dict[str, str], problems: list[str]) -> list[dict[str, Any]]:
+    """The steps of the package's program.py (none without one)."""
+    if PROGRAM not in texts:
+        return []
+    try:
+        steps, functions = flow.read(texts[PROGRAM])
+    except flow.Bad as err:
+        problems.append(str(err))
+        return []
+    problems += [f"{PROGRAM}: {p}" for p in flow.check(steps, functions)]
+    return steps
+
+
+def has_code(steps: list[dict[str, Any]]) -> bool:
+    return any(s.get("kind") == "code" for s in steps)

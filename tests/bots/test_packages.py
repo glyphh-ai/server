@@ -69,7 +69,13 @@ def test_the_library_is_the_eight_packages_each_named_as_its_folder() -> None:
     assert sorted(lib) == SLUGS and packages.library() is lib
     for slug, p in lib.items():
         assert (packages.LIBRARY / slug / packages.MANIFEST).is_file() and p.version == "1.0.0" and p.description
-        assert set(p.files) == {packages.MANIFEST, packages.SIDECAR, *(f"skills/{s}/SKILL.md" for s in p.skills)}
+        program = {"program.py"} if slug == "pr-review-digest" else set()  # a template with a program
+        assert set(p.files) == {
+            packages.MANIFEST,
+            packages.SIDECAR,
+            *program,
+            *(f"skills/{s}/SKILL.md" for s in p.skills),
+        }
         assert packages.check(p.files) == p  # what a bot keeps of it is a package too
 
 

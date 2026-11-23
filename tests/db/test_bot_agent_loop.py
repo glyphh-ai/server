@@ -90,7 +90,7 @@ async def test_a_database_with_loop_bots_is_brought_to_schema_sql_and_its_bots_c
     assert (await _recorded(eng))[-1][0] == BEFORE
     await apply_schema(eng, SETTINGS_HERE)
     assert await _shape(eng) == await _shape(engine)
-    assert (await _recorded(eng))[-1] == (26, "0026_bot_agent_loop")
+    assert (26, "0026_bot_agent_loop") in await _recorded(eng)
     assert "migrated: 0026_bot_agent_loop.sql" in said and "converted: {'orchestrators': 2, 'bots': 2}" in said
     async with eng.connect() as conn:
         bots = {(b.org_id, b.role): b for b in await conn.execute(select(Bot))}
