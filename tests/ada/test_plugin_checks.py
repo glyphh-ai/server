@@ -46,6 +46,7 @@ async def test_a_plugin_check(engine: AsyncEngine, ada: httpx.AsyncClient, worke
         pytest.skip("run by the tests below")
     sys.path[:0] = [f"{PLUGIN}/skills/screen-application/scripts", f"{PLUGIN}/checks"]
     import checks
+    import closeness_check
 
     _, key = await an_org(engine, ada)
 
@@ -64,6 +65,7 @@ async def test_a_plugin_check(engine: AsyncEngine, ada: httpx.AsyncClient, worke
         "others": lambda: checks.against_the_others(call, Path(CORPUS), mode),
         "together": lambda: checks.arriving_together(call, mode),
         "timing": lambda: checks.timing_learns(call),
+        "closeness": lambda: closeness_check.run(call, Path(CORPUS), peek=mode == "peek"),
     }[name]
     _done(await run())
 
