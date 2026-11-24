@@ -44,9 +44,10 @@ def _done(result: Any) -> None:
 async def test_a_plugin_check(engine: AsyncEngine, ada: httpx.AsyncClient, worker: Worker, jobs_worker: Worker) -> None:
     if CHECK in ("sdk", "mcp"):
         pytest.skip("run by the tests below")
-    sys.path[:0] = [f"{PLUGIN}/skills/screen-application/scripts", f"{PLUGIN}/checks"]
+    sys.path[:0] = [f"{PLUGIN}/skills/screen-application/scripts", f"{PLUGIN}/checks", f"{PLUGIN}/checks/facts"]
     import checks
     import closeness_check
+    import facts_check
 
     _, key = await an_org(engine, ada)
 
@@ -66,6 +67,9 @@ async def test_a_plugin_check(engine: AsyncEngine, ada: httpx.AsyncClient, worke
         "together": lambda: checks.arriving_together(call, mode),
         "timing": lambda: checks.timing_learns(call),
         "closeness": lambda: closeness_check.run(call, Path(CORPUS), peek=mode == "peek"),
+        "facts": lambda: facts_check.run(call, Path(CORPUS), mode),
+        "fraud": lambda: __import__("fraud_check").run(call, Path(CORPUS), mode),
+        "memory": lambda: __import__("memory_check").run(call, Path(CORPUS)),
     }[name]
     _done(await run())
 
