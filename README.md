@@ -1,3 +1,5 @@
+> **Moved.** This repository is archived. It now lives, with its full history, in [glyphh-ai/glyphh](https://github.com/glyphh-ai/glyphh/tree/main/server) as `server/`. Ada is a Glyphh Labs project and is no longer a hosted service: https://glyphh.ai
+
 # server
 
 The Glyphh server, https://api.glyphh.ai. Glyphh is one thing, Ada: this server is Ada Cloud (Ada models as an API,
