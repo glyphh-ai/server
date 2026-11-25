@@ -69,7 +69,8 @@ async def test_a_plugin_check(engine: AsyncEngine, ada: httpx.AsyncClient, worke
         "closeness": lambda: closeness_check.run(call, Path(CORPUS), peek=mode == "peek"),
         "facts": lambda: facts_check.run(call, Path(CORPUS), mode),
         "fraud": lambda: __import__("fraud_check").run(call, Path(CORPUS), mode),
-        "memory": lambda: __import__("memory_check").run(call, Path(CORPUS)),
+        "memory": lambda: __import__("memory_check").run(call, Path(CORPUS), mode),
+        "signals": lambda: getattr(__import__("signals_check"), mode)(call, Path(CORPUS)),
     }[name]
     _done(await run())
 
